@@ -1,0 +1,62 @@
+# === Node / Firebase ===
+node_modules/
+functions/node_modules/
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+emulator-ui-debug.log
+database-debug.log
+firestore-debug.log
+ui-debug.log
+storage_debug.log
+firebase-export-*.json
+
+# Functions (TypeScript build & caches)
+functions/lib/
+functions/dist/
+functions/.env*
+functions/.secret*
+functions/.cache
+functions/.eslintcache
+functions/tsconfig.tsbuildinfo
+
+# Root build & caches
+dist/
+lib/
+coverage/
+.cache/
+.parcel-cache/
+temp/
+tmp/
+
+# Env files (keep examples tracked)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Package managers (通常建議保留鎖檔，如無需可解開註解)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# === (可選) Python 相關：因專案路徑位於 C:\python ===
+__pycache__/
+*.pyc
+.venv/
+venv/
