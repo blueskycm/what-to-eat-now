@@ -1,0 +1,29 @@
+{
+  "firestore": {
+    "database": "(default)",
+    "location": "asia-east1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["venv", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"],
+      "runtime": "python313"
+    }
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "/line/**", "function": { "functionId": "line", "region": "asia-east1" } }
+    ],
+    "headers": [
+      { "source": "**/*.html", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
+    ]
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}
