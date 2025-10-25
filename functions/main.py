@@ -232,6 +232,64 @@ def build_nearby_keyword_url(lat: float, lng: float, keyword: str = "餐廳") ->
     kw = urlquote(keyword, safe="")
     return f"https://www.google.com/maps/search/{kw}/@{lat},{lng},16z"
 
+# ── Places：資料轉換與距離計算（補回缺的 helper） ─────────────────────────────
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """回傳兩點間的大圓距離（公里）"""
+    R = 6371.0
+    rlat1, rlng1, rlat2, rlng2 = map(radians, [lat1, lng1, lat2, lng2])
+    dlat = rlat2 - rlat1
+    dlng = rlng2 - rlng1
+    a = sin(dlat/2)**2 + cos(rlat1) * cos(rlat2) * sin(dlng/2)**2
+    c = 2 * asin(sqrt(a))
+    return R * c
+
+def _transform_place_item(p: dict, user_lat: float, user_lng: float) -> dict:
+    """
+    把 Google Places 回傳的單筆 result 轉成我們 Flex 需要的結構：
+    name/lat/lng/rating/total/vicinity/photo/mapUrl/distKm...
+    """
+    loc = ((p.get("geometry") or {}).get("location") or {})
+    lat = loc.get("lat")
+    lng = loc.get("lng")
+    name = p.get("name")
+    place_id = p.get("place_id")
+    rating = p.get("rating")
+    total = p.get("user_ratings_total") or p.get("userRatingsTotal") or 0
+    addr = p.get("vicinity") or p.get("formatted_address") or ""
+
+    # 第一張照片
+    photo_url = None
+    photos = p.get("photos") or []
+    if photos:
+        ref = photos[0].get("photo_reference")
+        if ref and PLACES_KEY:
+            # 用 Photo API 生成圖片 URL；LINE 端載入時才會打到 Google
+            photo_url = (
+                "https://maps.googleapis.com/maps/api/place/photo"
+                f"?maxwidth=800&photo_reference={urlquote(ref, safe='')}&key={PLACES_KEY}"
+            )
+
+    # 距離（公里，四捨五入到 2 位）
+    dist_km = None
+    try:
+        if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+            dist_km = round(_haversine_km(user_lat, user_lng, float(lat), float(lng)), 2)
+    except Exception:
+        dist_km = None
+
+    return {
+        "name": name,
+        "placeId": place_id,
+        "lat": lat,
+        "lng": lng,
+        "rating": rating,
+        "total": total,
+        "vicinity": addr,
+        "photo": photo_url,  # 若沒有照片會是 None；build_flex_carousel 會用預設圖
+        "mapUrl": build_place_map_url(name, place_id),
+        "distKm": dist_km,
+    }
+
 # ── 偵錯 ──────────────────────────────────────────────
 def _places_call(url: str, params: dict):
     # 不把 key 打在 log
@@ -442,6 +500,21 @@ def line(req: https_fn.Request) -> https_fn.Response:
                         }
                     }])
                     continue  # 這個事件到此結束，避免後面又處理到
+
+                # 3) 文字直接輸入半徑（例如 2000m）→ 設定並要求分享位置
+                if radius_match:
+                    try:
+                        radius = int(radius_match.group(1))
+                        set_user_radius(uid, radius)
+                        set_next(uid, "expect_location")  # 可選：標記目前等待位置
+                        line_reply(ev["replyToken"], [{
+                            "type": "text",
+                            "text": f"已設定搜尋半徑為 {radius} 公尺，請分享你的位置 📍",
+                            "quickReply": {"items":[{"type":"action","action":{"type":"location","label":"分享位置 📍"}}]}
+                        }])
+                    except ValueError:
+                        line_reply(ev["replyToken"], [{"type":"text","text":"半徑格式不正確，請輸入像 2000m 這樣的格式。"}])
+                    continue
 
             # 位置 → Places
             if mtype == "location":
