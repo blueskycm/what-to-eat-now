@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>what-to-eat-now｜管理後台登入</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:2rem}
+    .card{max-width:560px;border:1px solid #e5e7eb;border-radius:12px;padding:24px}
+    .muted{color:#6b7280}
+    .hidden{display:none}
+    button{padding:10px 16px;border-radius:8px;border:1px solid #e5e7eb;cursor:pointer}
+    .primary{background:#2563eb;color:#fff;border:0}
+    .ghost{background:#f3f4f6}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>管理後台</h1>
+    <p class="muted">請先用 Google 登入；若在 <code>admins/{uid}</code> 有白名單，即可進入管理頁。</p>
+
+    <p><strong>目前使用者：</strong><span id="who">未登入</span></p>
+    <p id="status" class="muted">請先登入</p>
+
+    <div style="display:flex;gap:12px;margin-top:12px">
+      <button id="btnLogin" class="primary">使用 Google 登入</button>
+      <button id="btnLogout" class="ghost hidden">登出</button>
+      <a id="btnGo" class="hidden" href="./surveys.html"><button class="primary">進入管理頁</button></a>
+    </div>
+  </div>
+
+  <script type="module" src="./admin.js"></script>
+</body>
+</html>
