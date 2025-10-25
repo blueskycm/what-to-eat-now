@@ -162,6 +162,13 @@ def get_top_food_prefs(uid: str, k: int = 5) -> list[str]:
 def set_next(uid: str, step: str | None):
     get_db().collection("users").document(uid).set({"session": {"next": step}}, merge=True)
 
+def set_session_pref(uid: str, pref: str | None):
+    get_db().collection("users").document(uid).set({"session": {"pref": pref}}, merge=True)
+
+def get_session_pref(uid: str) -> str | None:
+    snap = get_db().collection("users").document(uid).get()
+    return ((snap.to_dict() or {}).get("session") or {}).get("pref")
+
 def get_next(uid: str) -> str | None:
     snap = get_db().collection("users").document(uid).get()
     return ((snap.to_dict() or {}).get("session") or {}).get("next")
@@ -301,7 +308,7 @@ def _places_call(url: str, params: dict):
     r.raise_for_status()
     return data
 
-def _nearby_once(lat: float, lng: float, radius: int, types: str, opennow: bool, limit: int):
+def _nearby_once(lat: float, lng: float, radius: int, types: str, opennow: bool, limit: int, keyword: str | None = None):
     params = {
         "key": PLACES_KEY,
         "location": f"{lat},{lng}",
@@ -311,6 +318,8 @@ def _nearby_once(lat: float, lng: float, radius: int, types: str, opennow: bool,
     }
     if opennow:
         params["opennow"] = "true"
+    if keyword:
+        params["keyword"] = keyword
     data = _places_call("https://maps.googleapis.com/maps/api/place/nearbysearch/json", params)
     return (data.get("results") or [])[:limit]
 
@@ -328,7 +337,7 @@ def _textsearch_once(lat: float, lng: float, radius: int, query: str, opennow: b
     data = _places_call("https://maps.googleapis.com/maps/api/place/textsearch/json", params)
     return (data.get("results") or [])[:limit]
 
-def search_nearby_tiered(lat: float, lng: float, radii=(500, 800, 1200, 2000), limit=9):
+def search_nearby_tiered(lat: float, lng: float, radii=(500, 800, 1200, 2000), limit=9, q: str | None = None):
     """
     策略順序：
       A. nearby: type=restaurant, opennow
@@ -337,12 +346,23 @@ def search_nearby_tiered(lat: float, lng: float, radii=(500, 800, 1200, 2000), l
       D. nearby: type=restaurant（不限制營業中）
     找到就依距離+評分排序，取前 N。
     """
-    strategies = [
-        ("nearby",  {"types": "restaurant",               "opennow": True}),
-        ("nearby",  {"types": "food|meal_takeaway|cafe",  "opennow": True}),
-        ("text",    {"query": "餐廳|小吃|早午餐",             "opennow": True}),
-        ("nearby",  {"types": "restaurant",               "opennow": False}),
-    ]
+    # 先建策略：若有 q，優先用 q，否則走通用策略
+    if q:
+        q = q.strip()
+        strategies = [
+            ("nearby",  {"types": "restaurant",              "opennow": True,  "keyword": q}),           # A1: nearby + keyword
+            ("text",    {"query": q,                          "opennow": True}),                           # A2: textsearch q
+            ("text",    {"query": f"{q} 餐廳",                 "opennow": True}),                           # A3: textsearch q 餐廳
+            ("nearby",  {"types": "food|meal_takeaway|cafe", "opennow": True,  "keyword": q}),           # A4: broader types + keyword
+            ("nearby",  {"types": "restaurant",              "opennow": False, "keyword": q}),           # A5: nearby 不限營業中
+        ]
+    else:
+        strategies = [
+            ("nearby",  {"types": "restaurant",               "opennow": True}),
+            ("nearby",  {"types": "food|meal_takeaway|cafe",  "opennow": True}),
+            ("text",    {"query": "餐廳|小吃|早午餐",             "opennow": True}),
+            ("nearby",  {"types": "restaurant",               "opennow": False}),
+        ]
 
     pool = []
     used_radius = radii[-1]
@@ -351,7 +371,7 @@ def search_nearby_tiered(lat: float, lng: float, radii=(500, 800, 1200, 2000), l
             try:
                 raw = []
                 if kind == "nearby":
-                    raw = _nearby_once(lat, lng, r, p["types"], p["opennow"], limit=30)
+                    raw = _nearby_once(lat, lng, r, p["types"], p["opennow"], limit=30, keyword=p.get("keyword"))
                 else:
                     raw = _textsearch_once(lat, lng, r, p["query"], p["opennow"], limit=30)
                 items = [_transform_place_item(x, lat, lng) for x in raw]
@@ -462,6 +482,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                 if next_step == "expect_food" and not radius_match:
                     if msg_txt_norm:
                         record_food_pref(uid, msg_txt_norm)
+                        set_session_pref(uid, msg_txt_norm)  # ← 記住這次偏好
                     set_next(uid, "expect_radius")
                     line_reply(ev["replyToken"], [{
                         "type":"text",
@@ -532,23 +553,26 @@ def line(req: https_fn.Request) -> https_fn.Response:
                 items, used_radius = [], prefer
                 try:
                     N = cards_per_reply()
-                    items, used_radius = search_nearby_tiered(lat, lng, radii=(prefer,), limit=N)
+                    qpref = get_session_pref(uid)  # 可能為 None
+                    items, used_radius = search_nearby_tiered(lat, lng, radii=(prefer,), limit=N, q=qpref)
                 except Exception as e:
                     print("PLACES_EXC", repr(e))
                     items = []
 
                 if not items:
-                    line_reply(ev["replyToken"], [{
-                        "type": "text",
-                        "text": "這附近目前找不到有營業的餐廳😵，換個距離再找？",
-                        "quickReply": quick_reply_radius()
-                    }])
+                    msg_txt = "這附近目前找不到有營業的餐廳😵，換個距離再找？"
+                    if qpref:
+                        msg_txt = f"在這附近找不到「{qpref}」😵，換個距離再找？或換個關鍵字試試。"
+                    line_reply(ev["replyToken"], [{"type":"text","text": msg_txt, "quickReply": quick_reply_radius()}])
+                    set_session_pref(uid, None)
                     continue
 
+                title = f"用 {used_radius} 公尺範圍找到這些：" if not qpref else f"用 {used_radius} 公尺找「{qpref}」："
                 ok = line_reply(ev["replyToken"], [
-                    {"type": "text", "text": f"用 {used_radius} 公尺範圍找到這些："},
+                    {"type": "text", "text": title},
                     build_flex_carousel(items, lat, lng, LIFF_SLOT_URL)
                 ])
+
                 if not ok:
                     # 不要再回覆第二次，只記錄需要降級回覆的資訊
                     print("FLEX_FALLBACK_NEEDED", {
@@ -557,6 +581,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     })
 
                 set_next(uid, None)
+                set_session_pref(uid, None)
 
                 continue
 
