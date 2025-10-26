@@ -7,23 +7,13 @@
   <style>
     :root { --gray:#e5e7eb; --muted:#6b7280; --brand:#2563eb; }
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:0}
-    /* ===== Navbar ===== */
-    .nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--gray)}
-    .nav .wrap{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px}
-    .brand{font-weight:700}
-    .nav a{color:#111827;text-decoration:none;padding:8px 10px;border-radius:8px}
-    .nav a.active{background:#eef2ff;color:#3730a3}
-    .nav .right{display:flex;align-items:center;gap:10px}
-    .btn{padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
-    .btn.primary{background:var(--brand);color:#fff;border:0}
-    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--gray)}
-    .muted{color:var(--muted)}
-    /* ===== Content ===== */
     .container{max-width:840px;margin:18px auto;padding:0 16px}
     .card{border:1px solid var(--gray);border-radius:14px;padding:20px;background:#fff}
     .row{display:flex;gap:12px;align-items:center;margin:10px 0}
     label{min-width:160px;color:#111827}
     input,select{padding:8px 10px;border:1px solid var(--gray);border-radius:8px}
+    .btn{padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
+    .btn.primary{background:var(--brand);color:#fff;border:0}
     .danger{background:#ef4444;color:#fff;border:0}
     .right-actions{display:flex;gap:8px;justify-content:flex-end}
     .hidden{display:none}
@@ -34,23 +24,7 @@
   </style>
 </head>
 <body>
-  <!-- Navbar -->
-  <nav class="nav">
-    <div class="wrap">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span class="brand">what-to-eat-now｜管理後台</span>
-        <a href="./index.html">首頁</a>
-        <a href="./maps.html" class="active">Google Maps</a>
-        <!-- 預留未來功能 -->
-        <!-- <a href="./replies.html">回覆設定</a> -->
-        <!-- <a href="./analytics.html">分析</a> -->
-      </div>
-      <div class="right">
-        <span class="muted" id="navWho">檢查中…</span>
-        <button id="btnLogout" class="btn">登出</button>
-      </div>
-    </div>
-  </nav>
+  <div id="app-navbar"></div>
 
   <div class="container">
     <div class="card">
@@ -61,7 +35,6 @@
       <p id="guard" class="muted">檢查權限中…</p>
       <hr>
 
-      <!-- 設定表單 -->
       <div id="form" class="hidden">
         <div class="row">
           <label for="enabled">功能開關</label>
@@ -72,10 +45,10 @@
         <div class="row">
           <label for="mode">地圖模式</label>
           <select id="mode">
-              <option value="link">link（零成本：只有外連）</option>
-              <option value="static">static（省成本）</option>
-              <option value="embed">embed（中等）</option>
-              <option value="js">js（互動/最貴）</option>
+            <option value="link">link（零成本：只有外連）</option>
+            <option value="static">static（省成本）</option>
+            <option value="embed">embed（中等）</option>
+            <option value="js">js（互動/最貴）</option>
           </select>
         </div>
 
@@ -114,22 +87,12 @@
 
         <hr>
 
-        <!-- 今日用量 -->
         <h3 style="margin:6px 0 8px 0">今日用量</h3>
         <p class="muted" id="usageDate">—</p>
         <div class="grid">
-          <div class="pill">
-            <h4>Static</h4>
-            <div><b id="uStatic">0</b> 次</div>
-          </div>
-          <div class="pill">
-            <h4>Embed</h4>
-            <div><b id="uEmbed">0</b> 次</div>
-          </div>
-          <div class="pill">
-            <h4>JS</h4>
-            <div><b id="uJs">0</b> 次</div>
-          </div>
+          <div class="pill"><h4>Static</h4><div><b id="uStatic">0</b> 次</div></div>
+          <div class="pill"><h4>Embed</h4><div><b id="uEmbed">0</b> 次</div></div>
+          <div class="pill"><h4>JS</h4><div><b id="uJs">0</b> 次</div></div>
         </div>
         <div class="row" style="margin-top:12px">
           <label>合計</label>
@@ -139,6 +102,12 @@
     </div>
   </div>
 
+  <!-- 掛載共用 Navbar（→ ./lib/） -->
+  <script type="module">
+    import { mountNavbar } from "./lib/navbar.js";
+    mountNavbar({ active: "maps" });
+  </script>
+  <!-- 主程式 -->
   <script type="module" src="./maps.js"></script>
 </body>
 </html>
