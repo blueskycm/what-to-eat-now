@@ -74,6 +74,18 @@
 
       <hr>
 
+      <h3 style="margin:6px 0 8px 0">回覆設定</h3>
+      <p class="muted">調整機器人每次回傳的餐廳卡數量（3–9）。寫入：<code>settings/replies</code></p>
+
+      <div class="row">
+        <label for="cards">每次回傳張數</label>
+        <input id="cards" type="number" min="3" max="9" step="1" placeholder="5" />
+        <button id="btnSaveReplies" class="btn primary">儲存</button>
+      </div>
+      <div id="statusReplies" class="muted">—</div>
+
+      <hr>
+
       <!-- 今日用量 -->
       <h3 style="margin:6px 0 8px 0">今日用量</h3>
       <p class="muted" id="usageDate">—</p>

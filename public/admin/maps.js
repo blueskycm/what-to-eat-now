@@ -50,6 +50,10 @@ const ui = {
   uEmbed: $("uEmbed"),
   uJs: $("uJs"),
   uTotal: $("uTotal"),
+    // replies
+  cards: $("cards"),
+  btnSaveReplies: $("btnSaveReplies"),
+  statusReplies: $("statusReplies"),
 };
 
 let unsubCfg = null;
@@ -101,6 +105,42 @@ function bindLiveUsage() {
   });
 }
 
+function setStatusReplies(msg, ok=true){
+  ui.statusReplies.textContent = msg || "";
+  ui.statusReplies.style.color = ok ? "#065f46" : "#991b1b";
+}
+
+// 讀 settings/replies.cardsPerReply（沒有就預設 5）
+async function loadReplies(){
+  try{
+    const snap = await getDoc(doc(db, "settings", "replies"));
+    const n = (snap.exists() && Number(snap.data().cardsPerReply)) || 5;
+    ui.cards.value = Math.max(3, Math.min(9, Math.round(n)));
+    setStatusReplies("已載入目前張數設定。", true);
+  }catch(e){
+    console.error(e);
+    setStatusReplies("讀取失敗。", false);
+  }
+}
+
+// 寫入 settings/replies.cardsPerReply（限 admin）
+async function saveReplies(){
+  const val = Number(ui.cards.value);
+  if (!Number.isFinite(val) || val < 3 || val > 9){
+    return setStatusReplies("請輸入 3–9 的整數。", false);
+  }
+  try{
+    await setDoc(doc(db, "settings", "replies"), {
+      cardsPerReply: Math.round(val),
+      updatedAt: Date.now(),
+    }, { merge: true });
+    setStatusReplies(`已儲存：每次回傳 ${Math.round(val)} 張。`, true);
+  }catch(e){
+    console.error(e);
+    setStatusReplies("儲存失敗，請確認你是管理員。", false);
+  }
+}
+
 async function save() {
   const mode = ui.mode.value;
   const dailyBudgetUSD = Number(ui.dailyBudgetUSD.value);
@@ -134,6 +174,7 @@ ui.btnReload.onclick = async () => {
   ui.badge.textContent = cfg.enabled ? "啟用中" : "已關閉";
 };
 ui.btnSave.onclick = save;
+ui.btnSaveReplies.onclick = saveReplies;
 ui.btnDisable.onclick = kill;
 
 // 🔒 權限守門：查 Firestore admins 白名單
@@ -158,6 +199,7 @@ onAuthStateChanged(auth, async (user) => {
     ui.form.classList.remove("hidden");
     bindLiveConfig();
     bindLiveUsage();
+    await loadReplies();
   } catch (e) {
     console.error(e);
     ui.guard.textContent = "讀取權限時發生錯誤。";

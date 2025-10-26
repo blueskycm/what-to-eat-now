@@ -3,37 +3,43 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ───────── 共用函式 ─────────
+    // ─────────── 共用判斷 ───────────
     function isSignedIn() {
       return request.auth != null;
     }
-    // A) 以 custom claims 判定
-    function isAdminClaim() {
+
+    // A. 使用自訂 Claims 的管理員（Firebase Auth custom claims: admin=true）
+    function isAdminByClaim() {
       return isSignedIn() && request.auth.token.admin == true;
     }
-    // B) 以 Firestore 白名單判定（admins/{uid} 文件存在）
-    function isAdminDoc() {
-      return isSignedIn() &&
-             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-    // ✅ 兩者其一成立即視為管理員
-    function isAdmin() {
-      return isAdminClaim() || isAdminDoc();
+
+    // B. 使用 admins 白名單文件的管理員（admins/{uid} 存在）
+    function isAdminByList() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).exists();
     }
 
-    // ───────── 預設全部拒絕（保底） ─────────
+    // C. 彙整：任一條件成立即為管理員
+    function isAdmin() {
+      return isAdminByClaim() || isAdminByList();
+    }
+
+    // 小工具：字串長度限制
+    function strMax(x, n) { return x is string && x.size() <= n; }
+
+    // ─────────── 保底拒絕 ───────────
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // ───────── 管理員名單 ─────────
-    // 已登入者可讀「自己的」 admins 文件；寫入仍僅限管理員
+    // ─────────── 管理員白名單（後台用） ───────────
+    // 讀：僅本人可讀自己的 admins/{uid}；寫：只有管理員可以維護名單
     match /admins/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
       allow write: if isAdmin();
     }
 
-    // ───────── 僅管理員可讀寫的集合 ─────────
+    // ─────────── 僅管理員後台可讀寫的資料 ───────────
     match /flex_templates/{docId} {
       allow read, write: if isAdmin();
     }
@@ -41,28 +47,34 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
     match /events/{date}/logs/{logId} {
-      allow read: if isAdmin();   // 寫入由後端（Admin SDK）處理
+      allow read: if isAdmin();   // 寫入由後端（Admin SDK）執行
     }
     match /users/{lineUserId} {
       allow read, write: if isAdmin();
     }
 
-    // ───────── 可公開讀的前端設定（僅放不敏感資料）─────────
+    // ─────────── 可公開讀的前端設定（不含用量） ───────────
+    // 你的 maps.js / admin 頁都會讀這些設定；一般前端可讀，只有管理員可寫
     match /public_config/{docId} {
       allow read: if true;
       allow write: if isAdmin();
     }
-
-    // ───────── settings/maps（Google Maps 成本/開關）─────────
-    // 文件路徑：settings/maps
+    // settings/maps、settings/replies 皆走這條
     match /settings/{docId} {
-      allow read: if true;       // 前端可讀
-      allow write: if isAdmin(); // 管理員（claims 或白名單）可寫
+      allow read: if true;          // 前端/後端皆可讀（不含敏感資訊）
+      allow write: if isAdmin();    // 只有管理員可改
     }
 
-    // ───────── 前端事件蒐集（僅允許建立、不可讀/改/刪）─────────
-    // 建議集合：events_raw（由前端 addDoc；後台/排程做彙整）
-    function strMax(x, n) { return x is string && x.size() <= n; }
+    // ─────────── 今日用量（僅管理員可讀）───────────
+    // admin/maps.html 會顯示今日用量：usage_maps_daily/{YYYYMMDD}
+    // 讀：只有管理員；寫：禁止（使用 Admin SDK 無視規則）
+    match /usage_maps_daily/{dateId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ─────────── 前端事件蒐集：只允許「新增」───────────
+    // 任何人（含未登入/LIFF）都可上報，但不可讀/改/刪
     function isEventPayloadSafe(p) {
       return (p == null) || (p is map && p.size() <= 20);
     }
@@ -84,9 +96,8 @@ service cloud.firestore {
       && isEventPayloadSafe(d.payload);
     }
     match /events_raw/{id} {
-      // 任何人都可上報事件（含未登入/LIFF 使用者），但只能「新增」
       allow create: if isBasicEventShapeValid(request.resource.data);
-      allow read, update, delete: if false; // 後台只讀彙整後資料
+      allow read, update, delete: if false;
     }
   }
 }
