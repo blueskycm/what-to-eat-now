@@ -54,6 +54,7 @@ const ui = {
   cards: $("cards"),
   btnSaveReplies: $("btnSaveReplies"),
   statusReplies: $("statusReplies"),
+  uid: $("uid"),
 };
 
 let unsubCfg = null;
@@ -119,7 +120,7 @@ async function loadReplies(){
     setStatusReplies("已載入目前張數設定。", true);
   }catch(e){
     console.error(e);
-    setStatusReplies("讀取失敗。", false);
+    setStatusReplies(`讀取失敗：${e && (e.code || e.message)}`, false);
   }
 }
 
@@ -135,31 +136,41 @@ async function saveReplies(){
       updatedAt: Date.now(),
     }, { merge: true });
     setStatusReplies(`已儲存：每次回傳 ${Math.round(val)} 張。`, true);
-  }catch(e){
-    console.error(e);
-    setStatusReplies("儲存失敗，請確認你是管理員。", false);
-  }
+    } catch (e) {
+      console.error(e);
+      setStatusReplies(`儲存失敗：${(e && (e.code || e.message)) || e}`, false);
+    }
 }
 
 async function save() {
   const mode = ui.mode.value;
   const dailyBudgetUSD = Number(ui.dailyBudgetUSD.value);
   const warnAtPct = Number(ui.warnAtPct.value);
-  if (!["link","static","embed","js"].includes(mode)) return alert("mode 僅能為 static/embed/js");
+  if (!["link","static","embed","js"].includes(mode)) return alert("mode 僅能為 link/static/embed/js");
   if (!(dailyBudgetUSD >= 0)) return alert("每日預算需為非負數");
   if (!(warnAtPct >= 0 && warnAtPct <= 1)) return alert("預警門檻需在 0~1");
 
-  await setDoc(cfgRef, {
-    enabled: ui.enabled.checked,
-    mode, dailyBudgetUSD, warnAtPct,
-    updatedAt: Date.now(),
-  }, { merge: true });
-  alert("已儲存");
+  try {
+    await setDoc(cfgRef, {
+      enabled: ui.enabled.checked,
+      mode, dailyBudgetUSD, warnAtPct,
+      updatedAt: Date.now(),
+    }, { merge: true });
+    alert("已儲存");
+  } catch (e) {
+    console.error(e);
+    alert(`儲存失敗：${(e && (e.code || e.message)) || e}`);
+  }
 }
 
 async function kill() {
-  await setDoc(cfgRef, { enabled:false, updatedAt: Date.now() }, { merge: true });
-  alert("已關閉 Maps 功能");
+  try {
+    await setDoc(cfgRef, { enabled: false, updatedAt: Date.now() }, { merge: true });
+    alert("已關閉 Maps 功能");
+  } catch (e) {
+    console.error(e);
+    alert(`關閉失敗：${(e && (e.code || e.message)) || e}`);
+  }
 }
 
 ui.btnReload.onclick = async () => {
@@ -186,6 +197,7 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   ui.who.textContent = user.email || user.uid;
+  ui.uid.textContent = user.uid;
 
   try {
     const adminDoc = await getDoc(doc(db, "admins", user.uid));
