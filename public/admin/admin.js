@@ -1,5 +1,5 @@
-// Firebase v11 ESM 版
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+// admin.js —— 共用 firebase 初始化版本 (v11 ESM)
+import { getFirebase } from "./lib/firebase.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
@@ -7,26 +7,17 @@ import {
   getFirestore, doc, getDoc
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
-// 用你剛貼的 config
-const firebaseConfig = {
-  apiKey: "AIzaSyBx4_b4COBZalx6QIW9SeYbquCeLndhSG8",
-  authDomain: "what-to-eat-now-64db0.firebaseapp.com",
-  projectId: "what-to-eat-now-64db0",
-  storageBucket: "what-to-eat-now-64db0.firebasestorage.app",
-  messagingSenderId: "18967449501",
-  appId: "1:18967449501:web:970dd193560edfff4b2974",
-  measurementId: "G-XTYDV4WS4S"
-};
+// 取用共用單例
+const { app, auth, db } = getFirebase();
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+// Google 登入提供者
 const provider = new GoogleAuthProvider();
 provider.setCustomParameters({ prompt: "select_account" });
 
 const $ = id => document.getElementById(id);
 const show = (el, yes) => el.classList.toggle("hidden", !yes);
 
+// 登入/登出
 $("btnLogin").onclick = async () => {
   try {
     await signInWithPopup(auth, provider);
@@ -36,14 +27,18 @@ $("btnLogin").onclick = async () => {
 };
 $("btnLogout").onclick = () => signOut(auth);
 
+// 檢查是否在 admins 白名單
 async function isAdmin(uid){
   try {
     if (!uid) return false;
     const snap = await getDoc(doc(db, "admins", uid));
     return snap.exists();
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
+// 狀態監聽
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     $("who").textContent = "未登入";

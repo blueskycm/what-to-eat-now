@@ -1,37 +1,25 @@
-// Firebase v11 ESM
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+// maps.js —— 使用共用初始化 + 保留你既有邏輯
+import { getFirebase } from "./lib/firebase.js";
+import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
-// === 你的 Firebase 設定 ===
-const firebaseConfig = {
-  apiKey: "AIzaSyBx4_b4COBZalx6QIW9SeYbquCeLndhSG8",
-  authDomain: "what-to-eat-now-64db0.firebaseapp.com",
-  projectId: "what-to-eat-now-64db0",
-  storageBucket: "what-to-eat-now-64db0.firebasestorage.app",
-  messagingSenderId: "18967449501",
-  appId: "1:18967449501:web:970dd193560edfff4b2974",
-  measurementId: "G-XTYDV4WS4S"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db   = getFirestore(app);
+const { auth, db } = getFirebase();
 
 const $ = (id) => document.getElementById(id);
 
 // settings/maps 參考
 const cfgRef = doc(db, "settings", "maps");
 
-// 今日用量 doc 參考（usage_maps_daily/{YYYYMMDD}）
+// 今日用量文件
 function todayId(tz = "Asia/Taipei") {
   const d = new Date();
-  const y = d.toLocaleString("sv-SE", { timeZone: tz }).slice(0,10).replaceAll("-","");
-  return y; // e.g., 20250224
+  return d.toLocaleString("sv-SE", { timeZone: tz }).slice(0,10).replaceAll("-","");
 }
 const usageRef = () => doc(db, "usage_maps_daily", todayId());
 
 const ui = {
+  navWho: $("navWho"),
+  btnLogout: $("btnLogout"),
   who: $("who"),
   guard: $("guard"),
   form: $("form"),
@@ -44,21 +32,18 @@ const ui = {
   btnReload: $("btnReload"),
   btnSave: $("btnSave"),
   btnDisable: $("btnDisable"),
-  // usage
   usageDate: $("usageDate"),
   uStatic: $("uStatic"),
   uEmbed: $("uEmbed"),
   uJs: $("uJs"),
   uTotal: $("uTotal"),
-    // replies
   cards: $("cards"),
   btnSaveReplies: $("btnSaveReplies"),
   statusReplies: $("statusReplies"),
   uid: $("uid"),
 };
 
-let unsubCfg = null;
-let unsubUsage = null;
+let unsubCfg = null, unsubUsage = null;
 
 function fmtTs(ts){
   if (!ts) return "—";
@@ -70,10 +55,7 @@ function bindLiveConfig() {
   ui.badge.textContent = "同步中…";
   unsubCfg?.();
   unsubCfg = onSnapshot(cfgRef, (snap) => {
-    if (!snap.exists()) {
-      ui.badge.textContent = "無設定（儲存時會自動建立）";
-      return;
-    }
+    if (!snap.exists()) { ui.badge.textContent = "無設定（儲存時會自動建立）"; return; }
     const cfg = snap.data();
     ui.enabled.checked = !!cfg.enabled;
     ui.mode.value = cfg.mode || "link";
@@ -96,13 +78,10 @@ function bindLiveUsage() {
     const s = d.requests_static || 0;
     const e = d.requests_embed  || 0;
     const j = d.requests_js     || 0;
-    const total = s + e + j;
     ui.uStatic.textContent = s;
     ui.uEmbed.textContent  = e;
     ui.uJs.textContent     = j;
-    ui.uTotal.textContent  = total;
-  }, (err) => {
-    console.error(err);
+    ui.uTotal.textContent  = s + e + j;
   });
 }
 
@@ -111,7 +90,6 @@ function setStatusReplies(msg, ok=true){
   ui.statusReplies.style.color = ok ? "#065f46" : "#991b1b";
 }
 
-// 讀 settings/replies.cardsPerReply（沒有就預設 5）
 async function loadReplies(){
   try{
     const snap = await getDoc(doc(db, "settings", "replies"));
@@ -124,7 +102,6 @@ async function loadReplies(){
   }
 }
 
-// 寫入 settings/replies.cardsPerReply（限 admin）
 async function saveReplies(){
   const val = Number(ui.cards.value);
   if (!Number.isFinite(val) || val < 3 || val > 9){
@@ -136,10 +113,10 @@ async function saveReplies(){
       updatedAt: Date.now(),
     }, { merge: true });
     setStatusReplies(`已儲存：每次回傳 ${Math.round(val)} 張。`, true);
-    } catch (e) {
-      console.error(e);
-      setStatusReplies(`儲存失敗：${(e && (e.code || e.message)) || e}`, false);
-    }
+  } catch (e) {
+    console.error(e);
+    setStatusReplies(`儲存失敗：${(e && (e.code || e.message)) || e}`, false);
+  }
 }
 
 async function save() {
@@ -173,7 +150,7 @@ async function kill() {
   }
 }
 
-ui.btnReload.onclick = async () => {
+ui.btnReload?.addEventListener("click", async () => {
   const snap = await getDoc(cfgRef);
   if (!snap.exists()) { ui.badge.textContent = "無設定"; return; }
   const cfg = snap.data();
@@ -183,26 +160,29 @@ ui.btnReload.onclick = async () => {
   ui.warnAtPct.value = (cfg.warnAtPct ?? 0.8);
   ui.updatedAt.textContent = fmtTs(cfg.updatedAt);
   ui.badge.textContent = cfg.enabled ? "啟用中" : "已關閉";
-};
-ui.btnSave.onclick = save;
-ui.btnSaveReplies.onclick = saveReplies;
-ui.btnDisable.onclick = kill;
+});
+ui.btnSave?.addEventListener("click", save);
+ui.btnSaveReplies?.addEventListener("click", saveReplies);
+ui.btnDisable?.addEventListener("click", kill);
+ui.btnLogout?.addEventListener("click", () => signOut(auth));
 
-// 🔒 權限守門：查 Firestore admins 白名單
+// 權限守門
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     ui.who.textContent = "未登入";
+    ui.navWho.textContent = "未登入";
     ui.guard.textContent = "你尚未登入，請先回首頁登入。";
     ui.form.classList.add("hidden");
     return;
   }
-  ui.who.textContent = user.email || user.uid;
+  const whoText = user.email || user.uid;
+  ui.who.textContent = whoText;
+  ui.navWho.textContent = whoText;
   ui.uid.textContent = user.uid;
 
   try {
     const adminDoc = await getDoc(doc(db, "admins", user.uid));
-    const ok = adminDoc.exists();
-    if (!ok) {
+    if (!adminDoc.exists()) {
       ui.guard.textContent = "已登入，但尚未加入管理員白名單（admins/{uid}）。";
       ui.form.classList.add("hidden");
       return;

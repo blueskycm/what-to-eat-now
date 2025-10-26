@@ -6,18 +6,27 @@
   <title>後台｜Google Maps 成本與開關</title>
   <style>
     :root { --gray:#e5e7eb; --muted:#6b7280; --brand:#2563eb; }
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:2rem}
-    .card{max-width:840px;border:1px solid var(--gray);border-radius:14px;padding:20px}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:0}
+    /* ===== Navbar ===== */
+    .nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--gray)}
+    .nav .wrap{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px}
+    .brand{font-weight:700}
+    .nav a{color:#111827;text-decoration:none;padding:8px 10px;border-radius:8px}
+    .nav a.active{background:#eef2ff;color:#3730a3}
+    .nav .right{display:flex;align-items:center;gap:10px}
+    .btn{padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
+    .btn.primary{background:var(--brand);color:#fff;border:0}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--gray)}
+    .muted{color:var(--muted)}
+    /* ===== Content ===== */
+    .container{max-width:840px;margin:18px auto;padding:0 16px}
+    .card{border:1px solid var(--gray);border-radius:14px;padding:20px;background:#fff}
     .row{display:flex;gap:12px;align-items:center;margin:10px 0}
     label{min-width:160px;color:#111827}
     input,select{padding:8px 10px;border:1px solid var(--gray);border-radius:8px}
-    .muted{color:var(--muted)}
-    .btn{padding:10px 16px;border-radius:10px;border:1px solid var(--gray);cursor:pointer}
-    .primary{background:var(--brand);color:#fff;border:0}
     .danger{background:#ef4444;color:#fff;border:0}
-    .right{display:flex;gap:8px;justify-content:flex-end}
+    .right-actions{display:flex;gap:8px;justify-content:flex-end}
     .hidden{display:none}
-    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--gray)}
     hr{border:none;border-top:1px solid var(--gray);margin:16px 0}
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
     .pill{border:1px solid var(--gray);border-radius:12px;padding:12px}
@@ -25,87 +34,107 @@
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Google Maps 成本與開關</h1>
-    <p class="muted">此頁會讀寫 <code>settings/maps</code> 與讀取 <code>usage_maps_daily/{YYYYMMDD}</code>。只有管理員可使用。</p>
-
-    <p><b>目前使用者：</b><span id="who">檢查中…</span> <code id="uid"></code></p>
-    <p id="guard" class="muted">檢查權限中…</p>
-    <hr>
-
-    <!-- 設定表單 -->
-    <div id="form" class="hidden">
-      <div class="row">
-        <label for="enabled">功能開關</label>
-        <span class="badge" id="badge">同步中</span>
-        <input type="checkbox" id="enabled" />
+  <!-- Navbar -->
+  <nav class="nav">
+    <div class="wrap">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="brand">what-to-eat-now｜管理後台</span>
+        <a href="./index.html">首頁</a>
+        <a href="./maps.html" class="active">Google Maps</a>
+        <!-- 預留未來功能 -->
+        <!-- <a href="./replies.html">回覆設定</a> -->
+        <!-- <a href="./analytics.html">分析</a> -->
       </div>
-
-      <div class="row">
-        <label for="mode">地圖模式</label>
-        <select id="mode">
-            <option value="link">link（零成本：只有外連）</option>
-            <option value="static">static（省成本）</option>
-            <option value="embed">embed（中等）</option>
-            <option value="js">js（互動/最貴）</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label for="dailyBudgetUSD">每日預算（USD）</label>
-        <input id="dailyBudgetUSD" type="number" step="0.5" min="0" placeholder="3" />
-      </div>
-
-      <div class="row">
-        <label for="warnAtPct">預警門檻（0~1）</label>
-        <input id="warnAtPct" type="number" step="0.05" min="0" max="1" placeholder="0.8" />
-      </div>
-
-      <div class="row">
-        <label>最後更新</label>
-        <span id="updatedAt" class="muted">—</span>
-      </div>
-
       <div class="right">
-        <button id="btnReload" class="btn">重新載入</button>
-        <button id="btnSave" class="btn primary">儲存變更</button>
-        <button id="btnDisable" class="btn danger">一鍵關閉</button>
+        <span class="muted" id="navWho">檢查中…</span>
+        <button id="btnLogout" class="btn">登出</button>
       </div>
+    </div>
+  </nav>
 
+  <div class="container">
+    <div class="card">
+      <h1>Google Maps 成本與開關</h1>
+      <p class="muted">此頁會讀寫 <code>settings/maps</code> 與讀取 <code>usage_maps_daily/{YYYYMMDD}</code>。只有管理員可使用。</p>
+
+      <p><b>目前使用者：</b><span id="who">檢查中…</span> <code id="uid"></code></p>
+      <p id="guard" class="muted">檢查權限中…</p>
       <hr>
 
-      <h3 style="margin:6px 0 8px 0">回覆設定</h3>
-      <p class="muted">調整機器人每次回傳的餐廳卡數量（3–9）。寫入：<code>settings/replies</code></p>
-
-      <div class="row">
-        <label for="cards">每次回傳張數</label>
-        <input id="cards" type="number" min="3" max="9" step="1" placeholder="5" />
-        <button id="btnSaveReplies" class="btn primary">儲存</button>
-      </div>
-      <div id="statusReplies" class="muted">—</div>
-
-      <hr>
-
-      <!-- 今日用量 -->
-      <h3 style="margin:6px 0 8px 0">今日用量</h3>
-      <p class="muted" id="usageDate">—</p>
-      <div class="grid">
-        <div class="pill">
-          <h4>Static</h4>
-          <div><b id="uStatic">0</b> 次</div>
+      <!-- 設定表單 -->
+      <div id="form" class="hidden">
+        <div class="row">
+          <label for="enabled">功能開關</label>
+          <span class="badge" id="badge">同步中</span>
+          <input type="checkbox" id="enabled" />
         </div>
-        <div class="pill">
-          <h4>Embed</h4>
-          <div><b id="uEmbed">0</b> 次</div>
+
+        <div class="row">
+          <label for="mode">地圖模式</label>
+          <select id="mode">
+              <option value="link">link（零成本：只有外連）</option>
+              <option value="static">static（省成本）</option>
+              <option value="embed">embed（中等）</option>
+              <option value="js">js（互動/最貴）</option>
+          </select>
         </div>
-        <div class="pill">
-          <h4>JS</h4>
-          <div><b id="uJs">0</b> 次</div>
+
+        <div class="row">
+          <label for="dailyBudgetUSD">每日預算（USD）</label>
+          <input id="dailyBudgetUSD" type="number" step="0.5" min="0" placeholder="3" />
         </div>
-      </div>
-      <div class="row" style="margin-top:12px">
-        <label>合計</label>
-        <span><b id="uTotal">0</b> 次</span>
+
+        <div class="row">
+          <label for="warnAtPct">預警門檻（0~1）</label>
+          <input id="warnAtPct" type="number" step="0.05" min="0" max="1" placeholder="0.8" />
+        </div>
+
+        <div class="row">
+          <label>最後更新</label>
+          <span id="updatedAt" class="muted">—</span>
+        </div>
+
+        <div class="right-actions">
+          <button id="btnReload" class="btn">重新載入</button>
+          <button id="btnSave" class="btn primary">儲存變更</button>
+          <button id="btnDisable" class="btn danger">一鍵關閉</button>
+        </div>
+
+        <hr>
+
+        <h3 style="margin:6px 0 8px 0">回覆設定</h3>
+        <p class="muted">調整機器人每次回傳的餐廳卡數量（3–9）。寫入：<code>settings/replies</code></p>
+
+        <div class="row">
+          <label for="cards">每次回傳張數</label>
+          <input id="cards" type="number" min="3" max="9" step="1" placeholder="5" />
+          <button id="btnSaveReplies" class="btn primary">儲存</button>
+        </div>
+        <div id="statusReplies" class="muted">—</div>
+
+        <hr>
+
+        <!-- 今日用量 -->
+        <h3 style="margin:6px 0 8px 0">今日用量</h3>
+        <p class="muted" id="usageDate">—</p>
+        <div class="grid">
+          <div class="pill">
+            <h4>Static</h4>
+            <div><b id="uStatic">0</b> 次</div>
+          </div>
+          <div class="pill">
+            <h4>Embed</h4>
+            <div><b id="uEmbed">0</b> 次</div>
+          </div>
+          <div class="pill">
+            <h4>JS</h4>
+            <div><b id="uJs">0</b> 次</div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <label>合計</label>
+          <span><b id="uTotal">0</b> 次</span>
+        </div>
       </div>
     </div>
   </div>
