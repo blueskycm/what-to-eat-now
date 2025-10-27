@@ -13,6 +13,7 @@ export function mountNavbar(opts = {}) {
     { href: "./maps.html",   label: "Google Maps",   key: "maps"   },
     { href: "./styles.html", label: "樣式",          key: "styles" },
     { href: "./users.html",  label: "使用者清單",    key: "users"  },
+    { href: "./marketing.html", label: "特定行銷", key: "marketing" }
   ];
 
   // 自動判斷 active：依檔名比對 key（可被 opts.active 覆蓋）

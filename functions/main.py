@@ -7,6 +7,7 @@ from math import radians, sin, cos, asin, sqrt
 import os, json, hmac, hashlib, base64, datetime
 import httpx
 from urllib.parse import quote as urlquote
+from urllib.parse import urlparse, parse_qs
 import unicodedata, re
 from google.cloud.firestore_v1 import Increment, ArrayUnion
 from math import radians, sin, cos, asin, sqrt
@@ -14,7 +15,9 @@ import time
 from typing import Dict, Any
 
 import firebase_admin
-from firebase_admin import firestore as _fs 
+from firebase_admin import firestore as _fs
+import asyncio
+from firebase_admin import auth as _auth
 
 # 初始化 Admin SDK（若已初始化會跳過）
 if not firebase_admin._apps:
@@ -107,6 +110,76 @@ def get_theme(ttl_sec: int = THEME_TTL_SEC) -> dict:
     _THEME_CACHE["data"] = theme
     _THEME_CACHE["exp"]  = now + max(0, int(ttl_sec))
     return theme
+
+def normalize_image_url(url: str, size: int = 1200) -> str:
+    """
+    若為 Google Drive 分享連結，轉為可直接顯示的縮圖連結：
+    https://drive.google.com/thumbnail?id=<FILE_ID>&sz=w<size>
+    其它網址原樣返回。
+    """
+    if not url:
+        return url
+    u = url.strip()
+    if "drive.google.com" not in u:
+        return u
+
+    try:
+        parsed = urlparse(u)
+        file_id = None
+
+        # 1) /file/d/<id>/...  例：/file/d/11fAzbE_6ra00yN2xGPZ3F8wl6mAhBq-0/view
+        m = re.search(r"/file/d/([a-zA-Z0-9_-]{10,})", parsed.path)
+        if m:
+            file_id = m.group(1)
+
+        # 2) ?id=<id>  例：/uc?id=<id> 或 /open?id=<id>
+        if not file_id:
+            qs = parse_qs(parsed.query)
+            file_id = (qs.get("id") or [None])[0]
+
+        if file_id:
+            return f"https://drive.google.com/thumbnail?id={file_id}&sz=w{int(size)}"
+        return u
+    except Exception:
+        return u
+
+def _require_admin_from_idtoken(authorization: str) -> str:
+    """驗證前端帶來的 Firebase ID Token，確認呼叫者是 admins/{uid}。回傳 uid。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise PermissionError("MISSING_ID_TOKEN")
+    id_token = authorization.split(" ", 1)[1]
+    decoded = _auth.verify_id_token(id_token)
+    uid = decoded["uid"]
+    if not get_db().collection("admins").document(uid).get().exists:
+        raise PermissionError("NOT_ADMIN")
+    return uid
+
+def _build_single_bubble(title: str, body: str, image: str, btn_label: str, btn_url: str) -> dict:
+    theme     = get_theme()
+    btn_style = "primary" if theme.get("btnKind") == "primary" else "secondary"
+    btn_color = theme.get("btnColor") or "#00B900"
+    aspect    = _aspect_ratio(theme.get("heroRatio"))
+    mode      = _aspect_mode(theme.get("heroMode"))
+    fallback  = theme.get("fallbackImageUrl") or ""
+
+    img_url = normalize_image_url(image or fallback, size=1200)
+
+    bubble = {
+        "type": "bubble",
+        **({"hero": {
+            "type": "image", "url": img_url, "size": "full",
+            "aspectRatio": aspect, "aspectMode": mode
+        }} if img_url else {}),
+        "body": {"type":"box","layout":"vertical","spacing":"sm","contents":[
+            {"type":"text","text": (title or "通知"), "weight":"bold","size":"md","wrap":True},
+            *([{"type":"text","text": body, "size":"sm","wrap":True}] if body else [])
+        ]},
+        "footer":{"type":"box","layout":"vertical","spacing": _gap(theme.get("btnMargin")),
+          "contents":[{"type":"button","style":btn_style,"height":"sm","color":btn_color,
+            "action":{"type":"uri","label": (btn_label or "查看詳情"), "uri": (btn_url or "https://google.com")}
+          }],"flex":0}
+    }
+    return bubble
 
 # ── Firestore helpers ──────────────────────────────────────────────────────
 def yyyymmdd(ts: datetime.datetime | None = None) -> str:
@@ -667,3 +740,98 @@ def line(req: https_fn.Request) -> https_fn.Response:
                 continue
 
     return https_fn.Response("ok", status=200)
+
+@https_fn.on_request(region="asia-east1", secrets=["LINE_CHANNEL_ACCESS_TOKEN"])
+def adminPush(req: https_fn.Request) -> https_fn.Response:
+    """後台『特定行銷』推播 API。
+    請求格式：
+      headers: Authorization: Bearer <Firebase ID Token>
+      body: {
+        "targets": ["<LINE userId>", ...],   // 由前端勾選
+        "message": {
+          "type": "text", "text": "可\n換行"
+          // 或
+          "type": "flex", "title": "...", "body": "...", "image": "https://...", "buttonLabel": "...", "buttonUrl": "https://..."
+        }
+      }
+    回應：{ ok, batches, success, fail } 或 { error }
+    """
+    try:
+        # 1) 權限驗證
+        _require_admin_from_idtoken(req.headers.get("Authorization", ""))
+
+        if req.method != "POST":
+            return https_fn.Response(json.dumps({"error": "POST_ONLY"}), status=405,
+                                     headers={"Content-Type": "application/json"})
+
+        data = req.get_json(silent=True) or {}
+        targets = data.get("targets") or []
+        msg     = data.get("message") or {}
+        if not isinstance(targets, list) or not targets:
+            return https_fn.Response(json.dumps({"error": "NO_TARGETS"}), status=400,
+                                     headers={"Content-Type": "application/json"})
+
+        # 2) 組 LINE 訊息
+        if msg.get("type") == "text":
+            line_msg = {"type": "text", "text": str(msg.get("text") or "")[:5000]}
+        elif msg.get("type") == "flex":
+            bubble = _build_single_bubble(
+                title=msg.get("title") or "",
+                body=msg.get("body") or "",
+                image=msg.get("image") or "",
+                btn_label=msg.get("buttonLabel") or "查看詳情",
+                btn_url=msg.get("buttonUrl") or "https://google.com"
+            )
+            line_msg = {
+                "type": "flex",
+                "altText": (msg.get("title") or "通知")[:390] + "（圖卡）",
+                "contents": {"type": "carousel", "contents": [bubble]}
+            }
+        else:
+            return https_fn.Response(json.dumps({"error": "BAD_MESSAGE"}), status=400,
+                                     headers={"Content-Type": "application/json"})
+
+        # 3) 依 LINE multicast 限制分批（500/批）
+        CHUNK = 500
+        batches = [targets[i:i+CHUNK] for i in range(0, len(targets), CHUNK)]
+        succ = fail = 0
+        for batch in batches:
+            try:
+                r = httpx.post(
+                    "https://api.line.me/v2/bot/message/multicast",
+                    headers={
+                        "Authorization": f"Bearer {LINE_TOKEN}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"to": batch, "messages": [line_msg]},
+                    timeout=15.0,
+                )
+                if r.status_code < 400:
+                    succ += 1
+                else:
+                    fail += 1
+                    print("LINE_MULTICAST_ERR", r.status_code, r.text[:500])
+            except Exception as e:
+                fail += 1
+                print("LINE_MULTICAST_EXC", repr(e))
+
+        # 4) 記一筆 job
+        get_db().collection("push_jobs").add({
+            "ts": int(time.time()),
+            "type": msg.get("type"),
+            "targets": len(targets),
+            "batches": len(batches),
+            "success": succ,
+            "fail": fail,
+        })
+
+        return https_fn.Response(json.dumps({
+            "ok": True, "batches": len(batches), "success": succ, "fail": fail
+        }), headers={"Content-Type": "application/json"})
+
+    except PermissionError as e:
+        return https_fn.Response(json.dumps({"error": str(e)}), status=403,
+                                 headers={"Content-Type": "application/json"})
+    except Exception as e:
+        return https_fn.Response(json.dumps({"error": str(e)}), status=500,
+                                 headers={"Content-Type": "application/json"})

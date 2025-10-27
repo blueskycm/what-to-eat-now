@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>特定行銷｜後台</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Noto Sans TC,Arial; margin:24px; color:#111;}
+    h1{font-size:20px;margin:0 0 16px;}
+    .muted{color:#6b7280}
+    .page-wrap{max-width:1080px;margin:0 auto;padding:0 16px;}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .input{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px}
+    .btn{padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer}
+    .btn.primary{background:#111;color:#fff;border-color:#111}
+    table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+    thead{background:#f9fafb;}
+    th,td{padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+    .uid{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:#334155}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #e5e7eb;border-radius:999px;margin-right:6px;margin-bottom:4px;background:#fff}
+    .card{border:1px solid #e5e7eb;border-radius:12px;padding:12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width:800px){.grid{grid-template-columns:1fr}}
+    textarea{width:100%;min-height:120px}
+    .preview{white-space:pre-wrap;border:1px dashed #e5e7eb;border-radius:12px;padding:12px}
+  </style>
+</head>
+<body>
+  <div id="app-navbar"></div>
+
+  <div class="page-wrap">
+    <h1>特定行銷</h1>
+    <p class="muted" id="guard">正在檢查權限…</p>
+
+    <div class="row" style="margin:12px 0">
+      <input id="q" class="input" placeholder="搜尋 displayName / UID（即時過濾）" />
+      <span class="muted">喜好過濾：</span>
+      <input id="prefInput" class="input" style="min-width:260px" placeholder="例：牛肉麵, 拉麵, 飲料（以逗號分隔）" />
+      <span class="muted" id="stat"></span>
+      <div style="margin-left:auto"></div>
+      <button class="btn" id="prev">上一頁</button>
+      <button class="btn" id="next">下一頁</button>
+    </div>
+
+    <div class="card" style="margin:12px 0">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <label><input type="radio" name="mt" value="text" checked> 純文字</label>
+          <label style="margin-left:12px"><input type="radio" name="mt" value="flex"> 圖卡（1 按鈕）</label>
+        </div>
+        <div>
+          <button class="btn" id="selectAll">全選</button>
+          <button class="btn" id="clearSel">清除選取</button>
+          <button class="btn primary" id="send">發送推播</button>
+        </div>
+      </div>
+
+      <div id="boxText" style="margin-top:12px">
+        <textarea id="msgText" class="input" placeholder="輸入要推播的文字（可換行）"></textarea>
+        <div class="preview" id="textPreview" style="margin-top:8px"></div>
+      </div>
+
+      <div id="boxFlex" style="display:none;margin-top:12px">
+        <div class="grid">
+          <input id="fxTitle"  class="input" placeholder="主標題（如：本週推薦）" />
+          <input id="fxButton" class="input" placeholder="按鈕文字（如：查看詳情）" />
+          <input id="fxBody"   class="input" placeholder="內文（可略）" />
+          <input id="fxUrl"    class="input" placeholder="按鈕連結（https://）" />
+          <input id="fxImage"  class="input" placeholder="主圖 URL（https://，可用 Storage 下載連結）" />
+        </div>
+        <div class="preview" id="flexPreview" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div style="overflow:auto;border-radius:12px">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px"><input type="checkbox" id="chkHead"></th>
+            <th style="width:28%">使用者</th>
+            <th style="width:34%">UID</th>
+            <th>喜好（前 5）</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"><tr><td colspan="4" class="muted">載入中…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { getFirebase } from "./lib/firebase.js";
+    import { mountNavbar } from "./lib/navbar.js";
+    import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const { auth, db } = getFirebase();
+    mountNavbar({ active: "marketing" });
+
+    const ui = {
+      guard: document.getElementById("guard"),
+      tbody: document.getElementById("tbody"),
+      q: document.getElementById("q"),
+      pref: document.getElementById("prefInput"),
+      stat: document.getElementById("stat"),
+      prev: document.getElementById("prev"),
+      next: document.getElementById("next"),
+      chkHead: document.getElementById("chkHead"),
+      selectAll: document.getElementById("selectAll"),
+      clearSel: document.getElementById("clearSel"),
+      send: document.getElementById("send"),
+      boxText: document.getElementById("boxText"),
+      boxFlex: document.getElementById("boxFlex"),
+      msgText: document.getElementById("msgText"),
+      textPreview: document.getElementById("textPreview"),
+      fxTitle: document.getElementById("fxTitle"),
+      fxBody: document.getElementById("fxBody"),
+      fxButton: document.getElementById("fxButton"),
+      fxUrl: document.getElementById("fxUrl"),
+      fxImage: document.getElementById("fxImage"),
+      flexPreview: document.getElementById("flexPreview"),
+    };
+
+    // 切換訊息型態
+    document.querySelectorAll("input[name=mt]").forEach(r=>{
+      r.addEventListener("change", ()=>{
+        const v = getMsgType();
+        ui.boxText.style.display = v==="text" ? "" : "none";
+        ui.boxFlex.style.display = v==="flex" ? "" : "none";
+        refreshPreview();
+      });
+    });
+    function getMsgType(){ return document.querySelector("input[name=mt]:checked").value }
+
+    // 頁面狀態
+    let currentPage = [];
+    let _cursor=null, _stack=[];
+    const PAGE_SIZE=50;
+
+    function parsePrefTokens(v){
+      return String(v||"").split(",").map(s=>s.trim()).filter(Boolean).map(s=>s.toLowerCase());
+    }
+
+    function pickRow(u){
+      const displayName = u.displayName || u.session?.displayName || "（未命名）";
+      const uid = u.lastSource?.userId || u.uid || u.id;         // 這是 LINE userId
+      const top5 = Array.isArray(u.prefs_list)? u.prefs_list.slice(0,5):[];
+      return { id:u.id || u.uid || uid, displayName, uid, top5 };
+    }
+
+    function renderRows(list){
+      const kw = ui.q.value.trim().toLowerCase();
+      const prefs = parsePrefTokens(ui.pref.value);
+      const rows = list
+        .map(pickRow)
+        .filter(r=>{
+          const textOk = !kw || r.displayName.toLowerCase().includes(kw) || (r.uid||"").toLowerCase().includes(kw);
+          const prefsLower = r.top5.map(x=>String(x).toLowerCase());
+          const prefsOk = !prefs.length || prefs.some(tok => prefsLower.some(p=>p.includes(tok)));
+          return textOk && prefsOk;
+        });
+      ui.stat.textContent = `符合 ${rows.length} 筆（本頁）`;
+      ui.tbody.innerHTML = rows.map(r=>{
+        const prefHtml = r.top5.length ? r.top5.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join("") : `<span class="muted">（無）</span>`;
+        return `<tr>
+          <td><input type="checkbox" class="chkRow" data-uid="${escapeHtml(r.uid)}"></td>
+          <td>${escapeHtml(r.displayName)}</td>
+          <td class="uid">${escapeHtml(r.uid||"—")}</td>
+          <td>${prefHtml}</td>
+        </tr>`;
+      }).join("") || `<tr><td colspan="4" class="muted">本頁沒有資料</td></tr>`;
+    }
+
+    function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+    async function fetchPage(direction){
+      const usersRef = collection(db,"users");
+      let qy = query(usersRef, orderBy("__name__"), limit(PAGE_SIZE+1));
+      if(direction==="next" && _cursor){
+        const { startAfter } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+        qy = query(usersRef, orderBy("__name__"), startAfter(_cursor), limit(PAGE_SIZE+1));
+      }
+      const snap = await getDocs(qy);
+      const docs = snap.docs;
+      const hasMore = docs.length > PAGE_SIZE;
+      const page = hasMore ? docs.slice(0,PAGE_SIZE) : docs;
+      if(direction==="next" && page.length) _stack.push(page[0]);
+      if(page.length) _cursor = page.at(-1);
+      currentPage = page.map(d=>({id:d.id, ...d.data()}));
+      renderRows(currentPage);
+      ui.prev.disabled = _stack.length===0;
+      ui.next.disabled = !hasMore;
+      ui.chkHead.checked = false;
+    }
+
+    // 全選/清除
+    ui.chkHead.addEventListener("change", ()=>{
+      document.querySelectorAll(".chkRow").forEach(c=>c.checked = ui.chkHead.checked);
+    });
+    ui.selectAll.addEventListener("click", ()=>{
+      document.querySelectorAll(".chkRow").forEach(c=>c.checked = true); ui.chkHead.checked = true;
+    });
+    ui.clearSel.addEventListener("click", ()=>{
+      document.querySelectorAll(".chkRow").forEach(c=>c.checked = false); ui.chkHead.checked = false;
+    });
+
+    // 輸入即時過濾
+    ui.q.addEventListener("input", ()=>renderRows(currentPage));
+    ui.pref.addEventListener("input", ()=>renderRows(currentPage));
+
+    // 預覽
+    [ui.msgText, ui.fxTitle, ui.fxBody, ui.fxButton, ui.fxUrl, ui.fxImage].forEach(el=>el.addEventListener("input", refreshPreview));
+    function refreshPreview(){
+        if(getMsgType()==="text"){
+            ui.textPreview.textContent = ui.msgText.value || "（預覽）";
+        }else{
+            const imgPrev = normalizeDrive(ui.fxImage.value, 400); // 預覽用小一點
+            ui.flexPreview.textContent =
+            `標題：${ui.fxTitle.value || "——"}
+            內文：${ui.fxBody.value || "——"}
+            主圖：${imgPrev}
+            按鈕：${ui.fxButton.value || "——"} → ${ui.fxUrl.value || "——"}`;
+        }
+    }
+    refreshPreview();
+
+    // 發送
+    ui.send.addEventListener("click", async ()=>{
+      const uids = Array.from(document.querySelectorAll(".chkRow"))
+        .filter(c=>c.checked).map(c=>c.dataset.uid).filter(Boolean);
+      if(!uids.length){ alert("請先勾選要發送的使用者"); return; }
+
+      const type = getMsgType();
+      let body = {};
+      if(type==="text"){
+        if(!ui.msgText.value.trim()){ alert("請輸入文字內容"); return; }
+        body = { type:"text", text: ui.msgText.value };
+      }else{
+        if(!ui.fxTitle.value.trim() || !ui.fxButton.value.trim() || !ui.fxUrl.value.trim()){
+          alert("圖卡至少需要：主標題、按鈕文字、按鈕連結"); return;
+        }
+        body = {
+          type:"flex",
+          title: ui.fxTitle.value,
+          body:  ui.fxBody.value || "",
+          image: normalizeDrive(ui.fxImage.value, 1200), // 傳給後端用大圖寬度
+          buttonLabel: ui.fxButton.value,
+          buttonUrl: ui.fxUrl.value
+        };
+      }
+
+      const idToken = await auth.currentUser.getIdToken();
+      const res = await fetch("/admin/push", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "Authorization":"Bearer "+idToken },
+        body: JSON.stringify({ targets: uids, message: body })
+      });
+      const j = await res.json().catch(()=>({}));
+      if(res.ok){
+        alert(`已送出：批次 ${j.batches}，成功 ${j.success}，失敗 ${j.fail}`);
+      }else{
+        alert("送出失敗："+ (j.error||res.status));
+        console.log(j);
+      }
+    });
+
+    // 權限與載入
+    onAuthStateChanged(auth, async user=>{
+      if(!user){
+        ui.guard.textContent = "尚未登入，請先登入 Google 帳號。";
+        try{ await signInWithPopup(auth,new GoogleAuthProvider()); }catch{ ui.guard.textContent="登入已取消。"; return; }
+      }
+      const ok = await isAdmin(auth.currentUser.uid);
+      if(!ok){ ui.guard.textContent="已登入，但非管理員（admins/{uid} 不存在）。"; return; }
+      ui.guard.textContent = "已驗證管理員。";
+      fetchPage();
+    });
+
+    async function isAdmin(uid){
+      const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+      const d = await getDoc(doc(db,"admins",uid));
+      return d.exists();
+    }
+
+    function normalizeDrive(url, size = 400){
+        if(!url) return url;
+        try{
+            const u = new URL(String(url).trim());
+            if(!u.hostname.endsWith("drive.google.com")) return url;
+            // /file/d/<id>/... or ?id=<id>
+            let id = null;
+            const m = u.pathname.match(/\/file\/d\/([a-zA-Z0-9_-]{10,})/);
+            if(m) id = m[1];
+            if(!id) id = u.searchParams.get("id");
+            return id ? `https://drive.google.com/thumbnail?id=${id}&sz=w${parseInt(size,10)}` : url;
+        }catch{ return url; }
+        }
+
+  </script>
+</body>
+</html>
