@@ -132,7 +132,7 @@ firebase deploy --only functions,hosting
 ```mermaid
 sequenceDiagram
     autonumber
-    hide footbox  %% 隱藏底部角色方框/圖示
+    hide footbox
     actor U as 使用者 (LINE)
     participant L as LINE Platform
     participant H as Firebase Hosting (/line → rewrite)
@@ -165,7 +165,6 @@ sequenceDiagram
     alt 失敗 / 無結果
       F-->>L: 回覆「找不到結果」，建議擴大範圍或更換關鍵字
     end
-
 ```
 
 ---
