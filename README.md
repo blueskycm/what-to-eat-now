@@ -132,10 +132,10 @@ firebase deploy --only functions,hosting
 ```mermaid
 sequenceDiagram
     autonumber
-    hide footbox
-    actor U as 使用者 (LINE)
+    %% GitHub 版不支援 `hide footbox`，改用 participant 以避免上下各一個人像
+    participant U as 使用者 (LINE)
     participant L as LINE Platform
-    participant H as Firebase Hosting (/line → rewrite)
+    participant H as Firebase Hosting (/line -> rewrite)
     participant F as Cloud Function line (Python)
     participant FS as Firestore
     participant GP as Google Places API
@@ -146,16 +146,16 @@ sequenceDiagram
 
     Note right of F: 解析事件類型：\ntext / location / postback
 
-    alt text：關鍵字 / 距離設定
+    alt text (關鍵字/距離設定)
       F->>FS: upsert users/{uid} 偏好與參數
       F-->>L: 回覆引導訊息（請分享定位 / 設定距離）
-    else location：取得經緯度
+    else location (取得經緯度)
       F->>FS: 讀取 users/{uid} 偏好（半徑 / 關鍵字 / 樣式）
       F->>GP: 以 (lat, lng, keyword, radius) 搜尋餐廳
       GP-->>F: 回傳候選清單
       F->>FS: 記錄 events/{yyyymmdd}/logs
       F-->>L: 回覆 Flex Carousel（依 settings/replies.cardsPerReply）
-    else postback：UI 操作
+    else postback (UI 操作)
       F->>FS: 更新使用者設定 / 狀態
       F-->>L: 回覆對應訊息
     end
