@@ -1,7 +1,8 @@
 /* 共用 Navbar 樣式 */
 :root { --gray:#e5e7eb; --brand:#2563eb; --muted:#6b7280; }
 .app-nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--gray)}
-.app-nav .wrap{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px}
+/* 已有樣式保持；若需要讓連結在小寬度換行 */
+.app-nav .wrap{max-width:1080px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:10px 16px;gap:12px;flex-wrap:wrap}
 .app-nav .brand{font-weight:700}
 .app-nav a{color:#111827;text-decoration:none;padding:8px 10px;border-radius:8px}
 .app-nav a.active{background:#eef2ff;color:#3730a3}

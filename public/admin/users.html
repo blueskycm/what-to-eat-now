@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>使用者清單｜後台</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    body{font-family: system-ui,-apple-system,Segoe UI,Roboto,Noto Sans TC,Arial,"Apple Color Emoji","Segoe UI Emoji"; margin:24px; color:#111;}
+    h1{font-size:20px;margin:0 0 16px;}
+    .guard{margin:8px 0 16px;color:#6b7280;}
+    .toolbar{display:flex;gap:8px;align-items:center;margin:12px 0;}
+    .toolbar input{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;min-width:220px;}
+    .btn{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;}
+    .btn[disabled]{opacity:.5;cursor:not-allowed;}
+    table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;}
+    thead{background:#f9fafb;}
+    th,td{padding:10px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
+    th{font-weight:600;font-size:14px;color:#334155;white-space:nowrap;}
+    td{font-size:14px;}
+    .muted{color:#6b7280;}
+    .uid{font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:12px; color:#334155;}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #e5e7eb;border-radius:999px;margin-right:6px;margin-bottom:4px;background:#fff;}
+    .right{margin-left:auto}
+
+    /* 與 navbar 一樣寬 */
+    .page-wrap{max-width:1080px;margin:0 auto;padding:0 16px;}
+    /* 小螢幕時可橫向捲動 */
+    .table-scroll{overflow:auto;border-radius:12px;}
+  </style>
+</head>
+<body>
+  <!-- 導覽列 -->
+  <div id="app-navbar"></div>
+
+  <!-- ✅ 把所有內容包進 page-wrap -->
+  <div class="page-wrap">
+    <h1>使用者清單</h1>
+    <div class="guard" id="guard">正在檢查權限…</div>
+
+    <div class="toolbar">
+      <input id="q" placeholder="搜尋 displayName / UID（即時過濾）" />
+      <div class="right"></div>
+      <button class="btn" id="prev">上一頁</button>
+      <button class="btn" id="next">下一頁</button>
+    </div>
+
+    <!-- ✅ 正確打開/關閉 table-scroll -->
+    <div class="table-scroll">
+      <table id="table" aria-label="users table">
+        <thead>
+          <tr>
+            <th style="width:28%">使用者</th>
+            <th style="width:34%">UID</th>
+            <th>喜好食物（最多 5 項）</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="3" class="muted">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { getFirebase } from "./lib/firebase.js";
+    import { mountNavbar } from "./lib/navbar.js";
+    import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+    import { collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+    const { auth, db } = getFirebase();
+    mountNavbar({ active: "users" });
+
+    const ui = {
+      guard: document.getElementById("guard"),
+      tbody: document.getElementById("tbody"),
+      q:     document.getElementById("q"),
+      prev:  document.getElementById("prev"),
+      next:  document.getElementById("next"),
+    };
+
+    async function isAdmin(uid){
+      const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+      const d = await getDoc(doc(db, "admins", uid));
+      return d.exists();
+    }
+
+    const PAGE_SIZE = 50;
+    let _cursor = null;
+    let _stack  = [];
+
+    async function fetchPage(direction){
+      const usersRef = collection(db, "users");
+      let qy = query(usersRef, orderBy("__name__"), limit(PAGE_SIZE + 1));
+      if (direction === "next" && _cursor){
+        const { startAfter } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
+        qy = query(usersRef, orderBy("__name__"), startAfter(_cursor), limit(PAGE_SIZE + 1));
+      }
+      const snap = await getDocs(qy);
+      const docs = snap.docs;
+      const hasMore = docs.length > PAGE_SIZE;
+      const page = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
+
+      if (direction === "next"){
+        if (page.length) _stack.push(page[0]);
+      }
+      if (page.length) _cursor = page.at(-1);
+
+      renderRows(page.map(d => ({ id: d.id, ...d.data() })));
+      ui.prev.disabled = _stack.length === 0;
+      ui.next.disabled = !hasMore;
+    }
+
+    function pickRow(u){
+      const displayName = u.displayName || u.session?.displayName || "（未命名）";
+      const uidFromDoc  = u.lastSource?.userId || u.uid || u.id;
+      const top5 = Array.isArray(u.prefs_list) ? u.prefs_list.slice(0,5) : [];
+      return { displayName, uid: uidFromDoc, top5 };
+    }
+
+    function renderRows(list){
+      const keyword = ui.q.value.trim().toLowerCase();
+      const rows = list
+        .map(pickRow)
+        .filter(r => !keyword || (r.displayName || "").toLowerCase().includes(keyword) || (r.uid || "").toLowerCase().includes(keyword))
+        .map(r => {
+          const prefs = r.top5.length
+            ? r.top5.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join("")
+            : `<span class="muted">（無）</span>`;
+          return `<tr>
+              <td>${escapeHtml(r.displayName)}</td>
+              <td class="uid">${escapeHtml(r.uid || "—")}</td>
+              <td>${prefs}</td>
+            </tr>`;
+        }).join("");
+      ui.tbody.innerHTML = rows || `<tr><td colspan="3" class="muted">本頁沒有資料</td></tr>`;
+    }
+
+    function escapeHtml(s){
+      return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    }
+
+    ui.prev.addEventListener("click", ()=>{ if (_stack.length) fetchPage(); });
+    ui.next.addEventListener("click", ()=> fetchPage("next"));
+    ui.q.addEventListener("input", ()=> fetchPage());
+
+    onAuthStateChanged(auth, async user=>{
+      if (!user){
+        ui.guard.textContent = "尚未登入，請先登入 Google 帳號。";
+        try{ await signInWithPopup(auth, new GoogleAuthProvider()); }catch{ ui.guard.textContent = "登入已取消。"; return; }
+      }
+      if (!(await isAdmin(auth.currentUser.uid))){ ui.guard.textContent = "已登入，但非管理員（admins/{uid} 不存在）。"; return; }
+      ui.guard.textContent = "已驗證管理員。";
+      fetchPage();
+    });
+  </script>
+</body>
+</html>
