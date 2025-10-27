@@ -132,38 +132,40 @@ firebase deploy --only functions,hosting
 ```mermaid
 sequenceDiagram
     autonumber
+    hide footbox  %% 隱藏底部角色方框/圖示
     actor U as 使用者 (LINE)
     participant L as LINE Platform
     participant H as Firebase Hosting (/line → rewrite)
-    participant F as Cloud Function: line (Python)
+    participant F as Cloud Function line (Python)
     participant FS as Firestore
     participant GP as Google Places API
 
-    U->>L: 傳訊息/分享定位/點選Postback
+    U->>L: 傳訊息 / 分享定位 / 點選 Postback
     L-->>H: 呼叫 /line Webhook (HTTPS)
     H-->>F: 轉交 Function「line」
 
-    Note right of F: 解析事件類型：<br/>text / location / postback
+    Note right of F: 解析事件類型：\ntext / location / postback
 
-    alt text: 關鍵字/距離設定
-      F->>FS: upsert users/{uid} 偏好 & 參數
+    alt text：關鍵字 / 距離設定
+      F->>FS: upsert users/{uid} 偏好與參數
       F-->>L: 回覆引導訊息（請分享定位 / 設定距離）
-    else location: 取得經緯度
-      F->>FS: 讀取 users/{uid} 偏好（半徑/關鍵字/樣式）
-      F->>GP: 以 (lat,lng,keyword,radius) 搜尋餐廳
+    else location：取得經緯度
+      F->>FS: 讀取 users/{uid} 偏好（半徑 / 關鍵字 / 樣式）
+      F->>GP: 以 (lat, lng, keyword, radius) 搜尋餐廳
       GP-->>F: 回傳候選清單
       F->>FS: 記錄 events/{yyyymmdd}/logs
       F-->>L: 回覆 Flex Carousel（依 settings/replies.cardsPerReply）
-    else postback: UI 操作
-      F->>FS: 更新使用者設定/狀態
+    else postback：UI 操作
+      F->>FS: 更新使用者設定 / 狀態
       F-->>L: 回覆對應訊息
     end
 
-    Note over F,FS: 產圖時若遇到 Google Drive 連結 → 正規化成<br/>https://drive.google.com/thumbnail?id=...&sz=w1200
+    Note over F,FS: 若圖片為 Google Drive 連結，正規化為：\nhttps://drive.google.com/thumbnail?id=...&sz=w1200
 
-    alt 失敗/無結果
-      F-->>L: 回覆：找不到結果；建議擴大範圍/換關鍵字
+    alt 失敗 / 無結果
+      F-->>L: 回覆「找不到結果」，建議擴大範圍或更換關鍵字
     end
+
 ```
 
 ---
