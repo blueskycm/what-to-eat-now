@@ -22,11 +22,17 @@
     .uid{font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-size:12px; color:#334155;}
     .pill{display:inline-block;padding:2px 8px;border:1px solid #e5e7eb;border-radius:999px;margin-right:6px;margin-bottom:4px;background:#fff;}
     .right{margin-left:auto}
-
     /* 與 navbar 一樣寬 */
     .page-wrap{max-width:1080px;margin:0 auto;padding:0 16px;}
     /* 小螢幕時可橫向捲動 */
     .table-scroll{overflow:auto;border-radius:12px;}
+    .chips{display:flex;flex-wrap:wrap;gap:6px;margin-left:8px}
+    .chip{padding:4px 10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;cursor:pointer;font-size:13px}
+    .chip.active{background:#111;color:#fff;border-color:#111}
+    .toolbar label{font-size:13px;color:#6b7280;margin-left:12px}
+    /* 偏好輸入框 */
+    .pref-input{padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;min-width:260px}
+    .toolbar label{font-size:13px;color:#6b7280;margin-left:12px;margin-right:4px}
   </style>
 </head>
 <body>
@@ -40,6 +46,8 @@
 
     <div class="toolbar">
       <input id="q" placeholder="搜尋 displayName / UID（即時過濾）" />
+      <label for="prefInput">喜好過濾：</label>
+      <input id="prefInput" class="pref-input" placeholder="例如：牛肉麵, 拉麵, 飲料" />
       <div class="right"></div>
       <button class="btn" id="prev">上一頁</button>
       <button class="btn" id="next">下一頁</button>
@@ -74,10 +82,13 @@
     const ui = {
       guard: document.getElementById("guard"),
       tbody: document.getElementById("tbody"),
-      q:     document.getElementById("q"),
-      prev:  document.getElementById("prev"),
-      next:  document.getElementById("next"),
+      q: document.getElementById("q"),
+      prefInput: document.getElementById("prefInput"),   // 只剩輸入框
+      prev: document.getElementById("prev"),
+      next: document.getElementById("next"),
     };
+
+    let currentPage = [];   // 目前頁面的原始資料
 
     async function isAdmin(uid){
       const { doc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js");
@@ -101,12 +112,12 @@
       const hasMore = docs.length > PAGE_SIZE;
       const page = hasMore ? docs.slice(0, PAGE_SIZE) : docs;
 
-      if (direction === "next"){
-        if (page.length) _stack.push(page[0]);
-      }
+      if (direction === "next" && page.length) _stack.push(page[0]);
       if (page.length) _cursor = page.at(-1);
 
-      renderRows(page.map(d => ({ id: d.id, ...d.data() })));
+      currentPage = page.map(d => ({ id: d.id, ...d.data() }));
+      renderRows(currentPage);
+
       ui.prev.disabled = _stack.length === 0;
       ui.next.disabled = !hasMore;
     }
@@ -118,11 +129,33 @@
       return { displayName, uid: uidFromDoc, top5 };
     }
 
+    function parsePrefTokens(raw){
+      return String(raw || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => s.toLowerCase());
+    }
+
     function renderRows(list){
       const keyword = ui.q.value.trim().toLowerCase();
+      const prefTokens = parsePrefTokens(ui.prefInput.value);  // 以逗號分隔的多關鍵字
+
       const rows = list
         .map(pickRow)
-        .filter(r => !keyword || (r.displayName || "").toLowerCase().includes(keyword) || (r.uid || "").toLowerCase().includes(keyword))
+        .filter(r => {
+          // 文字過濾（displayName / UID）
+          const textOk = !keyword
+            || (r.displayName || "").toLowerCase().includes(keyword)
+            || (r.uid || "").toLowerCase().includes(keyword);
+
+          // 喜好過濾（OR：任一命中即可；要 AND 就改成 every）
+          const prefsLower = r.top5.map(x => String(x).toLowerCase());
+          const prefsOk = prefTokens.length === 0
+            || prefTokens.some(tok => prefsLower.some(p => p.includes(tok)));
+
+          return textOk && prefsOk;
+        })
         .map(r => {
           const prefs = r.top5.length
             ? r.top5.map(x => `<span class="pill">${escapeHtml(x)}</span>`).join("")
@@ -133,6 +166,7 @@
               <td>${prefs}</td>
             </tr>`;
         }).join("");
+
       ui.tbody.innerHTML = rows || `<tr><td colspan="3" class="muted">本頁沒有資料</td></tr>`;
     }
 
@@ -142,7 +176,8 @@
 
     ui.prev.addEventListener("click", ()=>{ if (_stack.length) fetchPage(); });
     ui.next.addEventListener("click", ()=> fetchPage("next"));
-    ui.q.addEventListener("input", ()=> fetchPage());
+    ui.q.addEventListener("input", ()=> renderRows(currentPage));
+    ui.prefInput.addEventListener("input", ()=> renderRows(currentPage));
 
     onAuthStateChanged(auth, async user=>{
       if (!user){
@@ -154,5 +189,6 @@
       fetchPage();
     });
   </script>
+
 </body>
 </html>
