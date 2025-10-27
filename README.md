@@ -129,7 +129,8 @@ firebase deploy --only functions,hosting
 
 ## 💬 LINE Bot 功能 (LINE Webhook)<a id="line-bot-功能-line-webhook"></a>
 
-```sequenceDiagram
+```mermaid
+sequenceDiagram
     autonumber
     actor U as 使用者 (LINE)
     participant L as LINE Platform
