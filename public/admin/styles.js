@@ -13,9 +13,10 @@ const ui = {
   thBtnColor:$("thBtnColor"), thBtnColorHex:$("thBtnColorHex"),
   thBtnMargin:$("thBtnMargin"), thHeroMode:$("thHeroMode"),
   thHeroRatio:$("thHeroRatio"), thSave:$("thSave"), thReset:$("thReset"), thMsg:$("thMsg"),
-  pvHero:$("pvHero"), pvBody:$("pvBody"), pvTitle:$("pvTitle"), pvSub:$("pvSub"),
-  pvKind:$("pvKind"), pvBtnColorVal:$("pvBtnColorVal"), pvBtnMarginVal:$("pvBtnMarginVal"),
-  pvHeroModeVal:$("pvHeroModeVal"), pvHeroRatioVal:$("pvHeroRatioVal"),
+  pvHero:$("pvHero"), pvHeroSizer:$("pvHeroSizer"), pvImg:$("pvImg"),
+  pvTitle:$("pvTitle"), pvSub:$("pvSub"), pvBody:$("pvBody"),
+  pvInfo:$("pvInfo"),
+  pvFooter:$("pvFooter"), pvBtn1:$("pvBtn1"), pvBtn2:$("pvBtn2"),
   fallbackFile:$("fallbackFile"), btnUpload:$("btnUpload"),
   upBar:$("upBar"), upMsg:$("upMsg"), fallbackThumb:$("fallbackThumb"),
   btnKind:()=>document.querySelector('input[name="thBtnKind"]:checked')?.value || "secondary",
@@ -54,50 +55,64 @@ async function ensureFallbackImageUrl() {
 }
 
 function applyPreview(){
-  document.documentElement.style.setProperty("--pv-btn-bg", theme.btnColor);
-  document.documentElement.style.setProperty("--pv-btn-fg", theme.btnKind==="primary" ? "#ffffff" : "#111827");
-  document.documentElement.style.setProperty("--pv-btn-gap", gapMap[theme.btnMargin] || "8px");
-  document.documentElement.style.setProperty("--pv-hero-ratio", (ratioMap[theme.heroRatio] || 56.25) + "%");
+  // 圖片比例高度（用 padding-top）
+  const padPct = (ratioMap[theme.heroRatio] || 56.25);
+  ui.pvHeroSizer.style.paddingTop = padPct + "%";
+
+  // 圖片裁切/顯示模式
+  ui.pvImg.style.objectFit = theme.heroMode === "fit" ? "contain" : "cover";
+
+  // 來源圖（先用題目圖；沒有就用 fallback）
   const url = theme.fallbackImageUrl || ui.pvHero.dataset.qimg || "";
   if (url){
-    ui.pvHero.style.backgroundImage = `url("${url}")`;
-    ui.pvHero.style.backgroundSize = theme.heroMode === "cover" ? "cover" : "contain";
-    ui.pvHero.style.backgroundRepeat = "no-repeat";
-    ui.pvHero.style.backgroundPosition = "center";
-    ui.pvHero.style.backgroundColor = "#000";
+    ui.pvImg.src = url;
     ui.fallbackThumb.style.backgroundImage = `url("${url}")`;
-  } else {
-    ui.pvHero.removeAttribute("style");
-    ui.pvHero.className = "pv-hero";
+  }else{
+    ui.pvImg.removeAttribute("src");
     ui.fallbackThumb.style.backgroundImage = "none";
   }
-  ui.pvKind.textContent = theme.btnKind;
-  ui.pvBtnColorVal.textContent = theme.btnColor;
-  ui.pvBtnMarginVal.textContent = theme.btnMargin;
-  ui.pvHeroModeVal.textContent = theme.heroMode;
-  ui.pvHeroRatioVal.textContent = theme.heroRatio;
+
+  // === 兩顆按鈕同樣式 ===
+  const btns = [ui.pvBtn1, ui.pvBtn2];
+  // 1) 切換 primary/secondary 字色（primary=白字、secondary=黑字）
+  for (const b of btns){
+    b.classList.toggle("primary", theme.btnKind === "primary");
+    b.classList.toggle("secondary", theme.btnKind !== "primary");
+    // 2) 底色統一使用你選的色（覆蓋 class 預設）
+    b.style.backgroundColor = theme.btnColor;
+    // 3) 邊框色：primary 用同色、secondary 用淺灰
+    b.style.borderColor = (theme.btnKind === "primary") ? theme.btnColor : "#d1d5db";
+  }
+  // 4) 兩顆之間的間距（footer 的 gap）
+  const gapClass = { none:"pv-gap-none", sm:"pv-gap-sm", md:"pv-gap-md", lg:"pv-gap-lg" }[theme.btnMargin] || "pv-gap-sm";
+  ui.pvFooter.classList.remove("pv-gap-none","pv-gap-sm","pv-gap-md","pv-gap-lg");
+  ui.pvFooter.classList.add(gapClass);
+
+  // 右側資訊摘要
+  ui.pvInfo.innerHTML = [
+    `• button.style : ${theme.btnKind}`,
+    `• button.color : ${theme.btnColor}`,
+    `• button.margin : ${theme.btnMargin}`,
+    `• hero.aspectMode : ${theme.heroMode}`,
+    `• hero.aspectRatio : ${theme.heroRatio}`
+  ].join("<br>");
 }
 
 function renderPreviewQuestion(q){
-  const title = q?.title || "我是誰？";
-  const sub   = q?.body  || "題目預覽";
-  const opts  = (q?.options || [{text:"選項 A"},{text:"選項 B"},{text:"選項 C"}]).slice(0,5);
-  ui.pvTitle.textContent = title;
-  ui.pvSub.textContent   = sub;
-  Array.from(ui.pvBody.querySelectorAll(".pv-btn")).forEach(n => n.remove());
-  for (const o of opts){
-    const b = document.createElement("button");
-    b.className = "pv-btn"; b.textContent = o.text || "選項";
-    ui.pvBody.appendChild(b);
-  }
+  ui.pvTitle.textContent = q?.title || "店名（範例）";
+  ui.pvSub.textContent   = q?.body  || "地址 · 0.8 km";
   ui.pvHero.dataset.qimg = q?.questionImageUrl || "";
   applyPreview();
 }
 
 async function loadPreviewQuestion(){
   const qref = query(collection(db, "qbank"), orderBy("qid", "desc"), limit(1));
-  const docs = await new Promise(resolve=>{
-    const unsub = onSnapshot(qref, s=>{unsub(); resolve(s.docs);});
+  const docs = await new Promise((resolve, reject)=>{
+    const unsub = onSnapshot(
+      qref,
+      s => { unsub(); resolve(s.docs); },
+      e => { unsub(); reject(e); }
+    );
   });
   renderPreviewQuestion(docs.length ? docs[0].data() : null);
 }
@@ -228,21 +243,33 @@ onAuthStateChanged(auth, async (user) => {
   ui.who.textContent = user.email || user.uid;
   ui.uid.textContent = user.uid;
 
-  try{
+  // 1) 驗證白名單
+  try {
     const adminDoc = await getDoc(doc(db, "admins", user.uid));
     if (!adminDoc.exists()){
       ui.guard.textContent = "已登入，但尚未加入管理員白名單（admins/{uid}）。";
       ui.form.classList.add("hidden");
       return;
     }
-    ui.guard.textContent = "已驗證管理員，可以調整樣式。";
-    ui.form.classList.remove("hidden");
-    bindForm();
-    await loadTheme();
-    await loadPreviewQuestion();
-  }catch(err){
-    console.error(err);
-    ui.guard.textContent = "讀取權限時發生錯誤。";
+  } catch (err) {
+    console.error("讀取 admins/{uid} 失敗：", err);
+    ui.guard.textContent = "讀取管理員白名單失敗（請檢查 Firestore 規則與專案）。";
     ui.form.classList.add("hidden");
+    return;
   }
+
+  ui.guard.textContent = "已驗證管理員，可以調整樣式。";
+  ui.form.classList.remove("hidden");
+  bindForm();
+
+  // 2) settings/theme（失敗不影響整體）
+  await loadTheme().catch(err=>{
+    console.error("讀取 settings/theme 失敗：", err);
+    ui.thMsg.textContent = "讀取樣式失敗（請檢查 settings/* 開放 read）。";
+  });
+
+  // 3) qbank（失敗就用空資料）
+  await loadPreviewQuestion().catch(err=>{
+    console.error("讀取 qbank 失敗：", err);
+  });
 });

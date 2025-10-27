@@ -2,7 +2,7 @@
 # LINE Webhook + 使用者資料/對話紀錄寫入 Firestore + Places + 距離選擇
 from firebase_functions import https_fn
 from firebase_functions.options import set_global_options
-from firebase_admin import initialize_app, firestore
+from firebase_admin import firestore
 from math import radians, sin, cos, asin, sqrt
 import os, json, hmac, hashlib, base64, datetime
 import httpx
@@ -10,6 +10,18 @@ from urllib.parse import quote as urlquote
 import unicodedata, re
 from google.cloud.firestore_v1 import Increment, ArrayUnion
 from math import radians, sin, cos, asin, sqrt
+import time
+from typing import Dict, Any
+
+import firebase_admin
+from firebase_admin import firestore as _fs 
+
+# 初始化 Admin SDK（若已初始化會跳過）
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
+
+# ── Theme 快取（60s） ─────────────────────────────
+_THEME_CACHE: Dict[str, Any] = {"data": None, "exp": 0}
 
 # ── Global options / Secrets ───────────────────────────────────────────────
 set_global_options(
@@ -18,18 +30,11 @@ set_global_options(
     secrets=["LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET", "PLACES_API_KEY"]
 )
 
-# 初始化 Admin SDK（在雲端會自動帶到憑證；本機 emulator 也可用）
-initialize_app()
-
 # 懶載入 Firestore（避免本機沒有 ADC 時在 import 階段就爆）
 _db = None
 def get_db():
     global _db
     if _db is None:
-        # 若走 Firestore Emulator，可指定 projectId（沒有也不影響）
-        if os.environ.get("FIRESTORE_EMULATOR_HOST") and not os.environ.get("GCLOUD_PROJECT"):
-            # emulator 情況下可選擇補 projectId（非必要）
-            pass
         _db = firestore.client()
     return _db
 
@@ -77,6 +82,31 @@ def fetch_line_profile(uid: str) -> dict | None:
     except httpx.HTTPError:
         return None
 
+# ── Theme (settings/theme) helpers ─────────────────────────────────────────
+THEME_TTL_SEC = 60
+_THEME_CACHE = {"data": None, "exp": 0}
+
+def get_theme(ttl_sec: int = THEME_TTL_SEC) -> dict:
+    import time
+    now = time.time()
+    if _THEME_CACHE["data"] and _THEME_CACHE["exp"] > now:
+        return _THEME_CACHE["data"]
+
+    doc = get_db().collection("settings").document("theme").get()
+    data = doc.to_dict() or {}
+
+    theme = {
+        "btnKind":          (data.get("btnKind") or "secondary"),
+        "btnColor":         (data.get("btnColor") or "#E5E7EB").upper(),
+        "btnMargin":        (data.get("btnMargin") or "sm"),
+        "heroMode":         (data.get("heroMode") or "cover"),   # cover | fit
+        "heroRatio":        (data.get("heroRatio") or "20:13"),  # 1:1 | 3:4 | 20:13 | 16:9
+        "fallbackImageUrl": (data.get("fallbackImageUrl") or ""),
+    }
+
+    _THEME_CACHE["data"] = theme
+    _THEME_CACHE["exp"]  = now + max(0, int(ttl_sec))
+    return theme
 
 # ── Firestore helpers ──────────────────────────────────────────────────────
 def yyyymmdd(ts: datetime.datetime | None = None) -> str:
@@ -190,41 +220,85 @@ def quick_reply_radius():
         }
     return {"items": [item("300m",300), item("500m",500), item("800m",800), item("1200m",1200), item("2000m",2000)]}
 
-def build_flex_carousel(items: list, user_lat: float, user_lng: float, liff_url: str):
+def _aspect_ratio(v: str) -> str:
+    return v if v in {"1:1", "3:4", "20:13", "16:9"} else "20:13"
+
+def _aspect_mode(v: str) -> str:
+    return "fit" if str(v).lower() == "fit" else "cover"
+
+def _gap(v: str) -> str:
+    m = {"none": "none", "sm": "sm", "md": "md", "lg": "lg"}
+    return m.get(str(v).lower(), "sm")
+
+def build_gmaps_url(lat: float, lng: float) -> str:
+    # 點位導向：用單一 query 參數（避免特殊符號）
+    q = urlquote(f"{lat},{lng}", safe="")
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+def build_nearby_url(lat: float, lng: float, keyword: str = "餐廳") -> str:
+    # 周邊搜尋：把「關鍵字 + 座標」合成一個 query 字串再編碼
+    # 例：query="拉麵 near 22.984201,120.237191"
+    q = urlquote(f"{keyword} near {lat},{lng}", safe="")
+    return f"https://www.google.com/maps/search/?api=1&query={q}"
+
+def build_flex_carousel(items: list[dict], user_lat: float | None = None, user_lng: float | None = None, liff_slot_url: str | None = None) -> dict:
+    """
+    items 需要至少包含：
+      - title / name（店名）
+      - address（可選，用於 subtitle）
+      - photo（可選，無則 fallback）
+      - lat, lng（地圖/周邊）
+      - mapUrl（可選，若無則用 lat/lng 組）
+    回傳可直接丟給 LINE 的 Flex Carousel 結構。
+    """
+    theme     = get_theme()
+    btn_style = "primary" if theme.get("btnKind") == "primary" else "secondary"
+    btn_color = theme.get("btnColor") or "#00B900"
+    spacing   = _gap(theme.get("btnMargin"))
+    aspect    = _aspect_ratio(theme.get("heroRatio"))
+    mode      = _aspect_mode(theme.get("heroMode"))
+    fallback  = theme.get("fallbackImageUrl") or "https://i.imgur.com/2JY3Szn.png"
+
     bubbles = []
     for it in items:
+        photo   = it.get("photo") or fallback
+        lat     = it.get("lat"); lng = it.get("lng")
+        map_url = it.get("mapUrl") or (build_gmaps_url(lat, lng) if lat and lng else None)
+        near_url= build_nearby_url(lat, lng, "餐廳") if (lat and lng) else None
+
+        footer_buttons = []
+        if map_url:
+            footer_buttons.append({
+                "type":"button","style":btn_style,"height":"sm","color":btn_color,
+                "action":{"type":"uri","label":"開啟 Google 地圖","uri": map_url}
+            })
+        if near_url:
+            footer_buttons.append({
+                "type":"button","style":btn_style,"height":"sm","color":btn_color,
+                "action":{"type":"uri","label":"查看周邊","uri": near_url}
+            })
+
         bubbles.append({
             "type":"bubble",
-            "hero":{"type":"image","url": it.get("photo") or "https://i.imgur.com/2JY3Szn.png",
-                    "size":"full","aspectRatio":"20:13","aspectMode":"cover"},
-            "body":{"type":"box","layout":"vertical","spacing":"sm","contents":[
-                {"type":"text","text":it.get("name",""),"weight":"bold","size":"md","wrap":True},
-                {"type":"text","text": it.get("vicinity") or "", "size":"sm", "color":"#555555", "wrap": True},
-                {"type":"text","text": f"⭐ {it.get('rating','-')}（{it.get('total',0)}）", "size":"sm", "color":"#888888"}
-            ]},
-            "footer":{"type":"box","layout":"vertical","spacing":"sm","contents":[
-                {"type":"button","style":"primary","height":"sm",
-                 "action":{"type":"uri","label":"開啟 Google 地圖","uri": it.get("mapUrl")}},
-                {"type":"button","style":"secondary","height":"sm",
-                 "action":{"type":"uri","label":"查看周邊",
-                           "uri": build_nearby_keyword_url(it.get('lat'), it.get('lng'), "餐廳")}}
-            ],"flex":0}
+            "hero":{
+                "type":"image","url":photo,"size":"full",
+                "aspectRatio":aspect,"aspectMode":mode
+            },
+            "body":{
+                "type":"box","layout":"vertical","spacing":"sm","contents":[
+                    {"type":"text","text": it.get("title") or it.get("name") or "店名",
+                     "weight":"bold","size":"md","wrap":True},
+                    *([{"type":"text","text": it.get("address") or it.get("subtitle") or "",
+                        "size":"xs","color":"#8D8D8D","wrap":True}] if (it.get("address") or it.get("subtitle")) else [])
+                ]
+            },
+            "footer":{
+                "type":"box","layout":"vertical","spacing":spacing,
+                "contents":footer_buttons,"flex":0
+            }
         })
-    # 拉霸入口泡泡
-    bubbles.append({
-        "type":"bubble",
-        "hero":{"type":"image","url":"https://i.imgur.com/0E0slot.png",
-                "size":"full","aspectRatio":"20:13","aspectMode":"cover"},
-        "body":{"type":"box","layout":"vertical","contents":[
-            {"type":"text","text":"我選不出來！","weight":"bold","size":"lg"},
-            {"type":"text","text":"用拉霸機幫我決定今天吃什麼 🎰","size":"sm","color":"#666666","wrap":True}
-        ]},
-        "footer":{"type":"box","layout":"vertical","spacing":"sm","contents":[
-            {"type":"button","style":"primary",
-             "action":{"type":"uri","label":"開啟拉霸機", "uri": f"{liff_url}?lat={user_lat}&lng={user_lng}"}}
-        ],"flex":0}
-    })
-    return {"type":"flex","altText":"附近餐廳推薦","contents":{"type":"carousel","contents":bubbles}}
+
+    return {"type": "carousel", "contents": bubbles}
 
 def build_place_map_url(name: str | None, place_id: str | None) -> str:
     # https://www.google.com/maps/search/?api=1&query=<encoded>&query_place_id=<encoded>
@@ -568,9 +642,16 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     continue
 
                 title = f"用 {used_radius} 公尺範圍找到這些：" if not qpref else f"用 {used_radius} 公尺找「{qpref}」："
+
+                flex_contents = build_flex_carousel(items, lat, lng, LIFF_SLOT_URL)  # {"type":"carousel",...}
+
                 ok = line_reply(ev["replyToken"], [
                     {"type": "text", "text": title},
-                    build_flex_carousel(items, lat, lng, LIFF_SLOT_URL)
+                    {
+                        "type": "flex",
+                        "altText": (title[:380] + "（圖卡）"),  # altText 必填且 ≤ 400 字
+                        "contents": flex_contents
+                    }
                 ])
 
                 if not ok:

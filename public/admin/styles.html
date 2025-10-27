@@ -3,54 +3,51 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>後台｜樣式設定</title>
+  <title>後台｜卡牌樣式</title>
   <style>
-    :root{
-      --gray:#e5e7eb; --muted:#6b7280; --brand:#2563eb;
-      --pv-btn-bg:#e5e7eb; --pv-btn-fg:#111827;
-      --pv-btn-gap:8px; --pv-hero-ratio:56.25%;
-    }
-    *,*::before,*::after{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto;margin:0;color:#111827;background:#fafafa}
+    :root{--gray:#e5e7eb;--muted:#6b7280;--brand:#2563eb}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto;margin:0;color:#111827}
     .container{max-width:980px;margin:18px auto;padding:0 16px}
-    .card{border:1px solid var(--gray);border-radius:14px;padding:20px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-
-    .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
-    .col-3{grid-column:span 3} .col-4{grid-column:span 4}
-    .col-5{grid-column:span 5} .col-6{grid-column:span 6} .col-7{grid-column:span 7}
-    .col-12{grid-column:span 12}
-
-    .muted{color:var(--muted)} .sp{height:12px}
-    label.small{font-size:12px;color:#6b7280;display:block;margin-bottom:6px}
-    input,select{width:100%;height:38px;padding:8px 10px;border:1px solid var(--gray);border-radius:8px;background:#fff}
-    input[type=color]{width:48px;height:38px;padding:0}
-    .btn{height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
+    .card{border:1px solid var(--gray);border-radius:14px;padding:20px;background:#fff}
+    .row{display:flex;gap:12px;align-items:center;margin:10px 0}
+    label{min-width:140px;color:#111827}
+    input,select{padding:8px 10px;border:1px solid var(--gray);border-radius:8px}
+    .btn{padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
     .btn.primary{background:var(--brand);color:#fff;border:0}
-    .btn[disabled]{opacity:.6;cursor:not-allowed}
+    .muted{color:var(--muted)}
     .hidden{display:none}
-    hr{border:none;border-top:1px solid var(--gray);margin:16px 0}
 
-    /* 預覽 */
-    .preview-wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
-    .flex-preview{width:360px;border:1px solid var(--gray);border-radius:16px;overflow:hidden;background:#fff}
-    .pv-hero{position:relative;width:100%;padding-top:var(--pv-hero-ratio);background:#f3f4f6 center/cover no-repeat}
-    .pv-body{padding:12px}
-    .pv-title{font-weight:700;font-size:18px;margin:2px 0 6px}
-    .pv-sub{color:#6b7280;font-size:12px;margin-bottom:8px}
-    .pv-sep{height:1px;background:#e5e7eb;margin:8px 0}
-    .pv-btn{display:block;width:100%;text-align:center;padding:10px 12px;border-radius:8px;border:0;margin-top:var(--pv-btn-gap);background:var(--pv-btn-bg);color:var(--pv-btn-fg);font-size:14px}
-
-    /* 上傳 */
-    .uploader{display:flex;gap:12px;align-items:center}
-    .thumb{width:72px;height:72px;border-radius:12px;background:#f3f4f6 center/cover no-repeat;border:1px solid var(--gray)}
-    .upload-ctrl{flex:1;display:flex;gap:8px;align-items:center}
-    .progress{height:8px;background:#f3f4f6;border-radius:999px;overflow:hidden}
-    .progress > i{display:block;height:100%;background:var(--brand);width:0%}
+    /* === 預覽卡樣式（模擬 LINE Flex） === */
+    .preview-wrap{display:flex;align-items:flex-start;gap:18px;margin-top:12px}
+    .preview-card{
+      width:340px;border:1px solid var(--gray);border-radius:16px;overflow:hidden;background:#fff;
+      box-shadow:0 1px 2px rgba(0,0,0,.04)
+    }
+    .preview-hero{
+      position:relative;width:100%;background:#f3f4f6;overflow:hidden
+    }
+    .preview-hero img{
+      position:absolute;inset:0;width:100%;height:100%;object-fit:cover
+    }
+    .preview-body{padding:12px 14px}
+    .preview-title{font-weight:700;margin:0 0 6px 0;line-height:1.25}
+    .preview-sub{font-size:14px;color:#6b7280;margin:0 0 6px 0}
+    .preview-meta{font-size:13px;color:#9ca3af}
+    .preview-footer{padding:12px 14px 14px 14px;display:flex;flex-direction:column;gap:8px}
+    .pv-btn{
+      width:100%;border-radius:10px;height:40px;display:flex;align-items:center;justify-content:center;
+      font-weight:600;border:1px solid var(--gray);background:#fff;color:#111827
+    }
+    .pv-btn.primary{background:#10b981;border-color:#10b981;color:#fff}
+    .pv-btn.secondary{background:#fff;border-color:#d1d5db;color:#111827}
+    .pv-btn:disabled{opacity:.6;cursor:not-allowed}
+    .pv-gap-none{gap:4px}.pv-gap-sm{gap:8px}.pv-gap-md{gap:12px}.pv-gap-lg{gap:16px}
+    .pv-img-round{border-bottom-left-radius:0;border-bottom-right-radius:0;border-top-left-radius:16px;border-top-right-radius:16px}
+    .code-panel{font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:#374151}
   </style>
 </head>
 <body>
   <div id="app-navbar"></div>
-
   <div class="container">
     <div class="card">
       <h1>卡牌樣式</h1>
@@ -132,34 +129,40 @@
 
         <hr>
 
-        <h3 style="margin:6px 0 8px 0">即時預覽</h3>
+        <h3>即時預覽</h3>
         <div class="preview-wrap">
-          <div class="flex-preview">
-            <div class="pv-hero" id="pvHero"></div>
-            <div class="pv-body" id="pvBody">
-              <div class="pv-sub" id="pvSub">題目</div>
-              <div class="pv-title" id="pvTitle">（載入中）</div>
-              <div class="pv-sep"></div>
+            <!-- 左側：卡片 -->
+            <div class="preview-card" id="pvCard">
+            <div class="preview-hero pv-img-round" id="pvHero" style="--ratio:56.25%">
+                <!-- 高度由 padding-top 控制，JS 會算 -->
+                <div id="pvHeroSizer" style="width:100%;padding-top:56.25%"></div>
+                <img id="pvImg" alt="hero"/>
             </div>
-          </div>
-          <div class="muted" style="max-width:520px">
-            <ul>
-              <li>button.style：<span id="pvKind">secondary</span></li>
-              <li>button.color：<span id="pvBtnColorVal">#E5E7EB</span></li>
-              <li>button.margin：<span id="pvBtnMarginVal">sm</span></li>
-              <li>hero.aspectMode：<span id="pvHeroModeVal">cover</span></li>
-              <li>hero.aspectRatio：<span id="pvHeroRatioVal">3:4</span></li>
-            </ul>
-          </div>
-        </div>
-      </div><!-- /form -->
-    </div>
-  </div>
+            <div class="preview-body" id="pvBody">
+              <h4 class="preview-title" id="pvTitle">店名（範例）</h4>
+              <p class="preview-sub" id="pvSub">地址 · 0.8 km</p>
+              <div class="preview-meta" id="pvMeta">⭐ 4.6（1,234）</div>
+            </div>
+            <div class="preview-footer pv-gap-sm" id="pvFooter">
+                <button class="pv-btn primary" id="pvBtn1">開啟 Google 地圖</button>
+                <button class="pv-btn secondary" id="pvBtn2">查看周邊</button>
+            </div>
+            </div>
 
+            <!-- 右側：目前樣式數值 -->
+            <div class="code-panel" id="pvInfo" style="min-width:280px">
+            <!-- JS 動態填 -->
+            </div>
+        </div>
+        </div>
+    </div>
+
+  <!-- 你原本的 navbar / firebase 初始化 / 上傳邏輯腳本都保持；只需確保 styles.js 有 renderPreviewCard() -->
+  <!-- 掛載共用 Navbar（→ ./lib/） -->
   <script type="module">
     import { mountNavbar } from "./lib/navbar.js";
-    mountNavbar({ active: "styles" });
+    mountNavbar({ active: "maps" });
   </script>
-  <script type="module" src="./styles.js"></script>
+  <script type="module" src="./styles.js?v=preview-card-1"></script>
 </body>
 </html>
