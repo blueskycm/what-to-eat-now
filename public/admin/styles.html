@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>後台｜樣式設定</title>
+  <style>
+    :root{
+      --gray:#e5e7eb; --muted:#6b7280; --brand:#2563eb;
+      --pv-btn-bg:#e5e7eb; --pv-btn-fg:#111827;
+      --pv-btn-gap:8px; --pv-hero-ratio:56.25%;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto;margin:0;color:#111827;background:#fafafa}
+    .container{max-width:980px;margin:18px auto;padding:0 16px}
+    .card{border:1px solid var(--gray);border-radius:14px;padding:20px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+
+    .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px}
+    .col-3{grid-column:span 3} .col-4{grid-column:span 4}
+    .col-5{grid-column:span 5} .col-6{grid-column:span 6} .col-7{grid-column:span 7}
+    .col-12{grid-column:span 12}
+
+    .muted{color:var(--muted)} .sp{height:12px}
+    label.small{font-size:12px;color:#6b7280;display:block;margin-bottom:6px}
+    input,select{width:100%;height:38px;padding:8px 10px;border:1px solid var(--gray);border-radius:8px;background:#fff}
+    input[type=color]{width:48px;height:38px;padding:0}
+    .btn{height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--gray);cursor:pointer;background:#fff}
+    .btn.primary{background:var(--brand);color:#fff;border:0}
+    .btn[disabled]{opacity:.6;cursor:not-allowed}
+    .hidden{display:none}
+    hr{border:none;border-top:1px solid var(--gray);margin:16px 0}
+
+    /* 預覽 */
+    .preview-wrap{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+    .flex-preview{width:360px;border:1px solid var(--gray);border-radius:16px;overflow:hidden;background:#fff}
+    .pv-hero{position:relative;width:100%;padding-top:var(--pv-hero-ratio);background:#f3f4f6 center/cover no-repeat}
+    .pv-body{padding:12px}
+    .pv-title{font-weight:700;font-size:18px;margin:2px 0 6px}
+    .pv-sub{color:#6b7280;font-size:12px;margin-bottom:8px}
+    .pv-sep{height:1px;background:#e5e7eb;margin:8px 0}
+    .pv-btn{display:block;width:100%;text-align:center;padding:10px 12px;border-radius:8px;border:0;margin-top:var(--pv-btn-gap);background:var(--pv-btn-bg);color:var(--pv-btn-fg);font-size:14px}
+
+    /* 上傳 */
+    .uploader{display:flex;gap:12px;align-items:center}
+    .thumb{width:72px;height:72px;border-radius:12px;background:#f3f4f6 center/cover no-repeat;border:1px solid var(--gray)}
+    .upload-ctrl{flex:1;display:flex;gap:8px;align-items:center}
+    .progress{height:8px;background:#f3f4f6;border-radius:999px;overflow:hidden}
+    .progress > i{display:block;height:100%;background:var(--brand);width:0%}
+  </style>
+</head>
+<body>
+  <div id="app-navbar"></div>
+
+  <div class="container">
+    <div class="card">
+      <h1>卡牌樣式</h1>
+      <p class="muted">讀寫 <code>settings/theme</code>。只有管理員可編輯。</p>
+
+      <p><b>目前使用者：</b><span id="who">檢查中…</span> <code id="uid"></code></p>
+      <p id="guard" class="muted">檢查權限中…</p>
+      <hr>
+
+      <div id="form" class="hidden">
+        <!-- 第一列：字色、顏色、間距、裁切 -->
+        <div class="grid">
+          <div class="col-6">
+            <label class="small">按鈕樣式（字色）</label>
+            <div style="display:flex;gap:12px;align-items:center">
+              <label><input type="radio" name="thBtnKind" value="secondary" checked> 次要（黑字）</label>
+              <label><input type="radio" name="thBtnKind" value="primary"> 主要（白字）</label>
+            </div>
+          </div>
+          <div class="col-3">
+            <label class="small">按鈕底色</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input id="thBtnColor" type="color" value="#E5E7EB">
+              <input id="thBtnColorHex" type="text" value="#E5E7EB" placeholder="#RRGGBB">
+            </div>
+          </div>
+          <div class="col-3">
+            <label class="small">按鈕間距</label>
+            <select id="thBtnMargin">
+              <option value="none">none</option>
+              <option value="sm" selected>sm</option>
+              <option value="md">md</option>
+              <option value="lg">lg</option>
+            </select>
+          </div>
+
+          <div class="col-4">
+            <label class="small">圖片裁切</label>
+            <select id="thHeroMode">
+              <option value="fit">fit（等比完整）</option>
+              <option value="cover" selected>cover（鋪滿裁切）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 第二列：比例 + 上傳 -->
+        <div class="grid">
+          <div class="col-5">
+            <label class="small">圖片比例</label>
+            <select id="thHeroRatio">
+              <option value="16:9">16:9</option>
+              <option value="20:13">20:13</option>
+              <option value="1:1">1:1</option>
+              <option value="3:4" selected>3:4</option>
+            </select>
+          </div>
+
+          <div class="col-7">
+            <label class="small">預設圖片（用於餐廳無圖或只連結模式）</label>
+            <div class="uploader">
+              <div id="fallbackThumb" class="thumb"></div>
+              <div class="upload-ctrl">
+                <input id="fallbackFile" type="file" accept="image/*" />
+                <button id="btnUpload" type="button" class="btn">上傳</button>
+              </div>
+            </div>
+            <div class="sp"></div>
+            <div class="progress"><i id="upBar"></i></div>
+            <div class="muted" id="upMsg">尚未選擇檔案</div>
+          </div>
+        </div>
+
+        <div class="sp"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="thSave" type="button" class="btn primary">儲存樣式</button>
+          <button id="thReset" type="button" class="btn">重設</button>
+          <span id="thMsg" class="muted"></span>
+        </div>
+
+        <hr>
+
+        <h3 style="margin:6px 0 8px 0">即時預覽</h3>
+        <div class="preview-wrap">
+          <div class="flex-preview">
+            <div class="pv-hero" id="pvHero"></div>
+            <div class="pv-body" id="pvBody">
+              <div class="pv-sub" id="pvSub">題目</div>
+              <div class="pv-title" id="pvTitle">（載入中）</div>
+              <div class="pv-sep"></div>
+            </div>
+          </div>
+          <div class="muted" style="max-width:520px">
+            <ul>
+              <li>button.style：<span id="pvKind">secondary</span></li>
+              <li>button.color：<span id="pvBtnColorVal">#E5E7EB</span></li>
+              <li>button.margin：<span id="pvBtnMarginVal">sm</span></li>
+              <li>hero.aspectMode：<span id="pvHeroModeVal">cover</span></li>
+              <li>hero.aspectRatio：<span id="pvHeroRatioVal">3:4</span></li>
+            </ul>
+          </div>
+        </div>
+      </div><!-- /form -->
+    </div>
+  </div>
+
+  <script type="module">
+    import { mountNavbar } from "./lib/navbar.js";
+    mountNavbar({ active: "styles" });
+  </script>
+  <script type="module" src="./styles.js"></script>
+</body>
+</html>

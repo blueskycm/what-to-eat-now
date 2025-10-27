@@ -1,0 +1,23 @@
+[
+  {
+    "origin": [
+      "https://what-to-eat-now-64db0.web.app",
+      "https://what-to-eat-now-64db0.firebaseapp.com",
+      "http://localhost:5000",
+      "http://localhost:5173",
+      "http://localhost:3000"
+    ],
+    "method": ["GET","HEAD","PUT","POST","DELETE","OPTIONS"],
+    "responseHeader": [
+      "Authorization",
+      "Content-Type",
+      "x-goog-resumable",
+      "x-goog-upload-protocol",
+      "x-goog-upload-command",
+      "x-goog-upload-offset",
+      "x-goog-upload-content-type",
+      "x-goog-upload-file-name"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

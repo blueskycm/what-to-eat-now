@@ -23,7 +23,10 @@
       { "source": "**/*.html", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }
     ]
   },
-  "storage": {
-    "rules": "storage.rules"
-  }
+  "storage": [
+    {
+      "bucket": "what-to-eat-now-64db0.firebasestorage.app",
+      "rules": "storage.rules"
+    }
+  ]
 }

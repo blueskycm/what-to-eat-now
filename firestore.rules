@@ -3,43 +3,46 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isSignedIn() { return request.auth != null; }
     function isAdminByClaim() { return isSignedIn() && request.auth.token.admin == true; }
-
-    // ✅ 用 exists() 判斷是否在 admins 白名單
     function isAdminByList() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-
     function isAdmin() { return isAdminByClaim() || isAdminByList(); }
 
     // 預設全部拒絕
     match /{document=**} { allow read, write: if false; }
 
-    // 管理員白名單：本人可讀；只有管理員可寫（維持你原本策略）
+    // 管理員白名單
     match /admins/{uid} {
       allow read: if isSignedIn() && request.auth.uid == uid;
       allow write: if isAdmin();
     }
 
-    // 設定：公開讀取（可改 isSignedIn()），僅管理員可寫
+    // 設定：公開讀，僅管理員可寫
     match /settings/{docId} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // Google Maps 用量：僅管理員可讀，禁止寫
+    // Google Maps 用量
     match /usage_maps_daily/{dateId} {
       allow read: if isAdmin();
       allow write: if false;
     }
 
-    // 其餘管理用集合：僅管理員可讀寫
+    // 其餘管理用集合
     match /flex_templates/{docId} { allow read, write: if isAdmin(); }
     match /push_jobs/{jobId}     { allow read, write: if isAdmin(); }
     match /events/{date}/logs/{logId} { allow read: if isAdmin(); }
     match /users/{lineUserId}    { allow read, write: if isAdmin(); }
 
-    // 事件資料形狀驗證（沿用你原本的）
+    // qbank：僅管理員可讀
+    match /qbank/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // 事件資料形狀驗證
     function strMax(x, n) { return x is string && x.size() <= n; }
     function isEventPayloadSafe(p) { return (p == null) || (p is map && p.size() <= 20); }
     function isBasicEventShapeValid(d) {
@@ -56,6 +59,9 @@ service cloud.firestore {
         && (!('ts' in d) || d.ts is int)
         && isEventPayloadSafe(d.payload);
     }
-    match /events_raw/{id} { allow create: if isBasicEventShapeValid(request.resource.data); }
+
+    match /events_raw/{id} {
+      allow create: if isBasicEventShapeValid(request.resource.data);
+    }
   }
 }
