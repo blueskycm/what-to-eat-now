@@ -132,7 +132,6 @@ firebase deploy --only functions,hosting
 ```mermaid
 sequenceDiagram
     autonumber
-    %% GitHub 版不支援 `hide footbox`，改用 participant 以避免上下各一個人像
     participant U as 使用者 (LINE)
     participant L as LINE Platform
     participant H as Firebase Hosting (/line -> rewrite)
@@ -147,22 +146,27 @@ sequenceDiagram
     Note right of F: 解析事件類型：\ntext / location / postback
 
     alt text (關鍵字/距離設定)
-      F->>FS: upsert users/{uid} 偏好與參數
-      F-->>L: 回覆引導訊息（請分享定位 / 設定距離）
+      F->>FS: 記錄偏好（users/{uid}）與對話摘要
+      F-->>L: 回覆引導：請設定距離 / 分享定位
     else location (取得經緯度)
-      F->>FS: 讀取 users/{uid} 偏好（半徑 / 關鍵字 / 樣式）
-      F->>GP: 以 (lat, lng, keyword, radius) 搜尋餐廳
-      GP-->>F: 回傳候選清單
-      F->>FS: 記錄 events/{yyyymmdd}/logs
-      F-->>L: 回覆 Flex Carousel（依 settings/replies.cardsPerReply）
+      F->>FS: 讀取偏好（半徑/關鍵字/樣式）
+      F->>FS: 讀取 settings/maps.enabled
+      alt enabled = false
+        F-->>L: 回覆「目前餐廳查詢功能暫時關閉，請稍後再試 🙏」
+      else enabled = true
+        F->>GP: 以 (lat, lng, keyword, radius) 搜尋餐廳
+        GP-->>F: 回傳候選清單
+        F->>FS: 記錄 events/{yyyymmdd}/logs
+        F-->>L: 回覆 Flex Carousel（依 settings/replies.cardsPerReply）
+      end
     else postback (UI 操作)
-      F->>FS: 更新使用者設定 / 狀態
-      F-->>L: 回覆對應訊息
+      F->>FS: 更新使用者設定 / 狀態（例如 radius）
+      F-->>L: 回覆對應訊息（可附 Quick Reply）
     end
 
-    Note over F,FS: 若圖片為 Google Drive 連結，正規化為：\nhttps://drive.google.com/thumbnail?id=...&sz=w1200
+    Note over F,FS: 若圖片為 Google Drive 連結，會正規化為：\nhttps://drive.google.com/thumbnail?id=...&sz=w1200
 
-    alt 失敗 / 無結果
+    alt 無結果 / 失敗
       F-->>L: 回覆「找不到結果」，建議擴大範圍或更換關鍵字
     end
 ```
@@ -174,7 +178,7 @@ sequenceDiagram
   |頁面                               |說明
   |-----------------------------------|------------------------------------
   |**index.html**                     |Google 登入頁，檢查 Firestore`admins/{uid}` 白名單
-  |**maps.html**                      |設定Google Maps API：成本模式、每日預算、警示門檻；同步Firestore 與 usage 監控
+  |**maps.html**                      |設定 Google Maps API：成本模式、每日預算、警示門檻，並具備 一鍵關閉功能（將 settings/maps.enabled 設為 `false`，使 LINE Bot 暫停回覆餐廳查詢）。再次打開時，只需勾選**功能開關**後按**儲存變更**。
   |**styles.html**                    |即時預覽與編輯 Flex 卡樣式，支援Storage 上傳 fallback 圖片
   |**marketing.html**                 |行銷推播工具，從 `users`過濾條件選取對象並呼叫 `adminPush`API
   |**users.html**                     |使用者清單檢視，支援displayName、UID、食物偏好即時篩選
@@ -222,14 +226,11 @@ https://drive.google.com/thumbnail?id=11fAzbE_6ra00yN2xGPZ3F8wl6mAhBq-0&sz=w1200
 ## 🔍 附註 (Notes)<a id="附註-notes"></a>
 
 -   所有前端程式皆採用 ESM 模組，引用 `firebase v11`。
-
 -   後端與前端共用同一個 Firebase 專案。
-
 -   Hosting domain：
-
         https://what-to-eat-now-64db0.web.app/admin/
-
 -   所有設定皆以 Firestore 為唯一真實資料來源。
+-   若 Maps 功能被關閉（settings/maps.enabled = false），LINE Bot 會回覆**目前餐廳查詢功能暫時關閉，請稍後再試 🙏**。此設定會即時生效，**無需重新部署 Cloud Functions**。
 
 ------------------------------------------------------------------------
 

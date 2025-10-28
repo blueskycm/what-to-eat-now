@@ -111,6 +111,16 @@ def get_theme(ttl_sec: int = THEME_TTL_SEC) -> dict:
     _THEME_CACHE["exp"]  = now + max(0, int(ttl_sec))
     return theme
 
+def is_maps_enabled() -> bool:
+    """讀取 settings/maps.enabled，預設 True（避免讀不到時誤殺服務）"""
+    try:
+        snap = get_db().document("settings/maps").get()
+        if snap.exists:
+            return bool((snap.to_dict() or {}).get("enabled", True))
+    except Exception:
+        pass
+    return True
+
 def normalize_image_url(url: str, size: int = 1200) -> str:
     """
     若為 Google Drive 分享連結，轉為可直接顯示的縮圖連結：
@@ -686,6 +696,13 @@ def line(req: https_fn.Request) -> https_fn.Response:
 
             # 位置 → Places
             if mtype == "location":
+                # ✅ 先檢查後台一鍵關閉開關
+                if not is_maps_enabled():
+                    line_reply(ev["replyToken"], [{
+                        "type": "text",
+                        "text": "目前餐廳查詢功能暫時關閉，請稍後再試 🙏"
+                    }])
+                    continue
                 lat = msg.get("latitude"); lng = msg.get("longitude")
                 prefer = get_user_radius(uid) if uid else None
 
