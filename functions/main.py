@@ -628,6 +628,14 @@ def line(req: https_fn.Request) -> https_fn.Response:
             if mtype == "text":
                 text = (msg.get("text") or "").strip()
 
+                # ✅ 若系統關閉，一開始輸入啟動詞就直接回覆
+                if not is_maps_enabled() and text in ("現在吃什麼", "吃什麼", "我要吃什麼"):
+                    line_reply(ev["replyToken"], [{
+                        "type": "text",
+                        "text": "目前餐廳查詢功能暫時關閉，請稍後再試 🙏"
+                    }])
+                    continue
+
                 # 會話狀態：若正在收偏好，就把本次文字當偏好，記錄後引導選半徑
                 next_step = get_next(uid)
                 msg_txt_raw = text
