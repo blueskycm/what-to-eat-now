@@ -20,7 +20,7 @@
   - [🌐 Google Drive 圖片轉換](#google-drive-圖片轉換)
   - [📡 管理員推播 API (`adminPush`)](#管理員推播-api-adminpush)
   - [🔍 附註 (Notes)](#附註-notes)
-  - [🧑‍💻 作者 (Author)](#作者-author)
+  - [🧑‍💻 作者 (Authors)](#作者-author)
 
 ---
 
@@ -234,8 +234,17 @@ https://drive.google.com/thumbnail?id=11fAzbE_6ra00yN2xGPZ3F8wl6mAhBq-0&sz=w1200
 
 ------------------------------------------------------------------------
 
-## 🧑‍💻 作者 (Author)<a id="作者-author"></a>
+## 🧑‍💻 作者 (Authors)<a id="作者-author"></a>
 
 **陳宗葆 Tsung-Pao Chen**\
-Platform Development Engineer / 台南\
-GitHub: [@tsungpaochen](https://github.com/tsungpaochen)
+Platform Development Engineer / 台南<br>
+GitHub: [@blueskycm](https://github.com/blueskycm)
+
+**蘇菲Sophia**<br>
+GitHub: [@sophialaoshi](https://github.com/sophialaoshi)
+
+**曜**<br>
+GitHub: [@barry0913962988-blip](https://github.com/barry0913962988-blip)
+
+**ShiYo**<br>
+GitHub: [@Yakitori197](https://github.com/Yakitori197)
