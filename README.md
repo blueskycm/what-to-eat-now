@@ -20,6 +20,7 @@
   - [🔐 Firestore 結構 (Firestore-Schema)](#firestore-結構-firestore-schema)
   - [💬 LINE Bot 功能 (LINE-Webhook)](#line-bot-功能-line-webhook)
   - [🧰 後台功能 (Admin-Console)](#後台功能-admin-console)
+  - [📢 管理推播（adminPush）](#管理推播-adminpush)
   - [📊 用量與計費：怎麼算？](#用量與計費-怎麼算)
   - [🌐 Google Drive 圖片轉換](#google-drive-圖片轉換)
   - [🔒 安全與權限](#安全與權限)
@@ -250,6 +251,109 @@ sequenceDiagram
   |**users.html**                     |使用者清單檢視，支援displayName、UID、食物偏好即時篩選
 
 ---
+
+## 📢 管理推播（adminPush）<a id="管理推播-adminpush"></a>
+
+> 對應後台頁面：[`/admin/marketing.html`](https://what-to-eat-now-64db0.web.app/admin/marketing.html)
+
+管理者可在此頁一次性發送特定行銷訊息，  
+支援自訂文字、圖片、Flex 圖卡（可含商品卡、活動卡等）。
+
+---
+
+### 🧩 操作方式
+
+1. 登入後台 → **行銷推播** 頁。
+2. 篩選對象：
+   - 可依使用者屬性（地區、偏好、上次互動日期）過濾。
+   - 預設會讀取 Firestore `users/{uid}` 的欄位。
+3. 編輯推播內容：
+   - **文字訊息**：支援多行與 emoji。
+   - **圖片訊息**：可貼上 Google Drive 連結（系統自動轉為 thumbnail）。
+   - **Flex 圖卡**：可選擇「產品卡樣式」或「活動卡樣式」，來源為 `settings/theme`。
+4. 點擊「送出推播」：
+   - 會呼叫 Functions `adminPush()`。
+   - 後端以批次方式發送給符合條件的使用者。
+
+---
+
+### ⚙️ 內部流程 (Mermaid)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as 管理者（後台）
+    participant H as Firebase Hosting (/admin/marketing.html)
+    participant F as Cloud Function「adminPush」(Python)
+    participant FS as Firestore
+    participant L as LINE Platform
+    participant CR as C# Usage API (Cloud Run)
+
+    A->>H: 編輯訊息 + 選取推播對象
+    H->>F: 呼叫 /adminPush API（攜帶 ID Token）
+    F->>FS: 驗證管理員權限（admins/{uid} 是否存在）
+    alt 權限通過
+        F->>FS: 取得目標使用者清單
+        loop 每位收件人
+            F->>L: POST /v2/bot/message/push
+            L-->>F: 回覆 HTTP 200（成功）
+            F->>FS: 寫入 events/outbox/logs
+            F->>CR: /stats/ping（含 summary、收件人數）
+            alt Usage API 失敗
+                F->>FS: 累加 usage_maps_daily.{dateId}.counters
+            end
+        end
+    else 非管理員
+        F-->>H: 回傳 403 Forbidden
+    end
+```
+### 📦 Firestore 寫入範例
+```bash
+events/outbox/logs/{docId}
+```
+記錄以下欄位：
+| 欄位         | 說明                                                 |
+| ---------- | -------------------------------------------------- |
+| `ts`       | 時間戳記（毫秒）                                           |
+| `channel`  | 固定為 `"line"`                                       |
+| `kind`     | `"push"`                                           |
+| `to`       | 收件人 UID 陣列                                         |
+| `messages` | 實際傳送的訊息內容（文字、Flex、圖片等）                             |
+| `summary`  | 各類訊息數量摘要（text / image / flexBubble / flexCarousel） |
+| `traceId`  | 本次推播唯一識別 ID（防重複）                                   |
+| `result`   | `"ok"` 或 `"failed"`                                |
+
+### 💰 計費與統計
+| 類別         | 計算方式                                                     |
+| ---------- | -------------------------------------------------------- |
+| **推播計數**   | 每筆訊息 × 收件人數                                              |
+| **卡片類型**   | Flex bubble / carousel 同樣會被計數                            |
+| **用量來源**   | 同樣寫入 `usage_maps_daily/{dateId}`（累加）                     |
+| **回補 API** | 若需重算，可使用 `backfill_usage` 並指定 `"includeAdminPush": true` |
+
+> 📘 提醒：
+>- 若推播失敗（使用者封鎖、過期 token），系統會標記 "result": "failed"，不再累計。
+>- 用量 API (/stats/today) 會將管理推播與使用者互動分開列出。
+
+### ⚠️ 注意事項
+- **權限**：僅限 `admins/{uid}` 白名單內帳號。
+- **推播次數上限**：單日推播次數建議 ≤ 10 次，以免 LINE 官方觸發防濫發限流。
+- **內容審查**：若包含 URL、圖片，請確保來源 HTTPS 且可公開存取。
+- **收件人測試**：建議先用「預覽模式」僅發送給自己。
+- **推播與回覆分流**：
+  - 回覆 (reply)：使用者主動互動，不乘收件人數。
+  - 推播 (push)：系統主動發送，乘收件人數。
+
+### ✅ 管理者操作範例
+- 全體推播
+  > 例如週末活動、優惠券、假期通知。
+- 特定條件推播
+  > 僅發送給「上次互動超過 7 天未使用」或「偏好關鍵字 = 火鍋」的使用者。
+- 定期公告
+  > 每月初自動發送「本月推薦餐廳」，可與排程 Cloud Scheduler 整合。
+
+---
+
 ## 📊 用量與計費：怎麼算？<a id="用量與計費-怎麼算"></a>
 ### 即時計數（reply / push）
 - reply（使用者互動）<br>
@@ -268,7 +372,22 @@ sequenceDiagram
   - **餐廳卡片** × 2（圖片 + 位置連結）
 - 今日：來自 C# `/stats/today`；若 API 失效，改用 Firestore 今日文件補值
 - 本月：逐日加總 `usage_maps_daily/*` 以相同公式計算
+
 > 註：`messages_total` 為當日實際送出的 LINE 訊息總數（文字/圖片/Flex 等合計），**不是** Places API 次數。
+
+> 📎 **官方費率說明**
+>
+> - **Google Maps Places API 價格表**  
+>   https://developers.google.com/maps/billing/gmp-billing?hl=zh-tw  
+>   - 「Places API」屬於 *Places Details*、*Nearby Search*、*Text Search* 類別  
+>   - 每次查詢會計一次請求；若同時載入圖片（Place Photo）則額外計費  
+>   - 費用以「每 1000 次請求」計算，依地區與帳號計價方案略有不同  
+>
+> - **LINE Messaging API 使用量與費率**  
+>   https://developers.line.biz/en/pricing/messaging-api/  
+>   - 官方帳號每月有免費額度（取決於方案）  
+>   - 超出部分以訊息數量（含文字、Flex、圖片）計費  
+>   - 「推播（push）」與「回覆（reply）」皆會計入訊息數
 
 ### 回補歷史（Backfill API）
 > 需要「管理員 ID Token」，只回填 reply；可選擇是否含管理推播。
