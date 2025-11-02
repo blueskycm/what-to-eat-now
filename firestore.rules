@@ -1,63 +1,108 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    /* ───────── 共用：身分判定 ───────── */
     function isSignedIn() { return request.auth != null; }
     function isAdminByClaim() { return isSignedIn() && request.auth.token.admin == true; }
+    // 白名單：admins/{uid} 存在即為管理員
     function isAdminByList() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
     function isAdmin() { return isAdminByClaim() || isAdminByList(); }
 
-    // 預設全部拒絕
+    /* 預設全部拒絕 */
     match /{document=**} { allow read, write: if false; }
 
-    // 管理員白名單
+    /* ───────── 管理員白名單 ─────────
+       本人可讀；只有管理員可寫 */
     match /admins/{uid} {
-      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow read:  if isSignedIn() && request.auth.uid == uid;
       allow write: if isAdmin();
     }
 
-    // 設定：公開讀，僅管理員可寫
+    /* ───────── 設定檔 ─────────
+       前端可公開讀，僅管理員可寫（例：settings/maps） */
     match /settings/{docId} {
-      allow read: if true;
+      allow read:  if true;
       allow write: if isAdmin();
     }
 
-    // Google Maps 用量
+    /* ───────── 使用者清單（users）─────────
+       後台頁面讀取使用者名單用；僅管理員可讀 */
+    match /users/{uid} {
+      allow read: if isAdmin();
+      // 若後台需要修改備註／封鎖等，開啟下行：
+      // allow write: if isAdmin();
+
+      match /{sub=**} {
+        allow read: if isAdmin();
+        // allow write: if isAdmin();
+      }
+    }
+
+    /* （可選）若你同時有 members / members_admin 兩種主檔，保留以下規則 */
+    match /members/{uid} {
+      allow read: if isAdmin();
+      // allow write: if isAdmin();
+      match /{sub=**} {
+        allow read: if isAdmin();
+        // allow write: if isAdmin();
+      }
+    }
+
+    match /members_admin/{uid} {
+      allow read: if isAdmin();
+      allow write: if isAdmin(); // 後台可能會調整 roles/status
+      match /{sub=**} {
+        allow read: if isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+    /* ───────── 用量統計 ─────────
+       管理員可讀；限定欄位的建立/更新；logs 子集合可新增 */
     match /usage_maps_daily/{dateId} {
       allow read: if isAdmin();
-      allow write: if false;
+
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          "dateId", "createdAt", "updatedAt", "counters", "regions"
+        ])
+        && (request.resource.data.counters == null || request.resource.data.counters is map)
+        && (request.resource.data.regions  == null || request.resource.data.regions  is map);
+
+      match /logs/{logId} {
+        allow read:   if isAdmin();
+        allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(["metric","region","at"])
+          && request.resource.data.metric is string
+          && (request.resource.data.region == null || request.resource.data.region is string);
+      }
     }
 
-    // 其餘管理用集合
-    match /flex_templates/{docId} { allow read, write: if isAdmin(); }
-    match /push_jobs/{jobId}     { allow read, write: if isAdmin(); }
-    match /events/{date}/logs/{logId} { allow read: if isAdmin(); }
-    match /users/{lineUserId}    { allow read, write: if isAdmin(); }
-
-    // qbank：僅管理員可讀
-    match /qbank/{id} {
-      allow read: if isAdmin();
-      allow write: if false;
-    }
-
-    // 事件資料形狀驗證
+    /* ───────── 事件安全寫入（events_raw）─────────
+       僅允許符合形狀的新增，避免濫寫 */
     function strMax(x, n) { return x is string && x.size() <= n; }
     function isEventPayloadSafe(p) { return (p == null) || (p is map && p.size() <= 20); }
+
     function isBasicEventShapeValid(d) {
-      return d.keys().hasOnly(['type','payload','ts','uid','lineUserId','ua','sessionId','restaurantId','restaurantName','button','category'])
-        && d.type is string
-        && (!('uid' in d) || d.uid is string)
-        && (!('lineUserId' in d) || d.lineUserId is string)
-        && (!('restaurantId' in d) || d.restaurantId is string)
-        && (!('restaurantName' in d) || strMax(d.restaurantName, 120))
-        && (!('button' in d) || strMax(d.button, 40))
-        && (!('category' in d) || strMax(d.category, 40))
-        && (!('ua' in d) || strMax(d.ua, 300))
-        && (!('sessionId' in d) || strMax(d.sessionId, 64))
-        && (!('ts' in d) || d.ts is int)
-        && isEventPayloadSafe(d.payload);
+      return d.keys().hasOnly([
+        'type','payload','ts','uid','lineUserId',
+        'sessionId','restaurantId','restaurantName','button','category','ua'
+      ])
+      && d.type is string
+      && (!('uid' in d)            || d.uid is string)
+      && (!('lineUserId' in d)     || d.lineUserId is string)
+      && (!('restaurantId' in d)   || d.restaurantId is string)
+      && (!('restaurantName' in d) || strMax(d.restaurantName, 120))
+      && (!('button' in d)         || strMax(d.button, 40))
+      && (!('category' in d)       || strMax(d.category, 40))
+      && (!('ua' in d)             || strMax(d.ua, 300))
+      && (!('sessionId' in d)      || strMax(d.sessionId, 64))
+      && (!('ts' in d)             || d.ts is int)
+      && isEventPayloadSafe(d.payload);
     }
 
     match /events_raw/{id} {

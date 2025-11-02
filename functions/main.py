@@ -23,9 +23,6 @@ from firebase_admin import auth as _auth
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
 
-# ── Theme 快取（60s） ─────────────────────────────
-_THEME_CACHE: Dict[str, Any] = {"data": None, "exp": 0}
-
 # ── Global options / Secrets ───────────────────────────────────────────────
 set_global_options(
     region="asia-east1",
@@ -41,6 +38,35 @@ def get_db():
         _db = firestore.client()
     return _db
 
+import datetime as _dt
+
+_TZ = _dt.timezone(_dt.timedelta(hours=8))  # Asia/Taipei
+
+def _today_id(dt: _dt.datetime | None = None) -> str:
+    now = dt.astimezone(_TZ) if dt else _dt.datetime.now(tz=_TZ)
+    return now.strftime("%Y%m%d")
+
+def _usage_ref(date_id: str):
+    return get_db().collection("usage_maps_daily").document(date_id)
+
+def _seen_mark_and_check(date_id: str, key: str) -> bool:
+    """
+    以日為單位去重：第一次回傳 False（並寫入 seen[key]=true），之後回傳 True。
+    """
+    ref = _usage_ref(date_id)
+    tx = get_db().transaction()
+
+    @firestore.transactional
+    def _tx(t):
+        snap = ref.get(transaction=t)
+        seen = (snap.to_dict() or {}).get("seen", {}) if snap.exists else {}
+        if key in seen:
+            return True
+        t.set(ref, {"dateId": date_id, "seen": {key: True}}, merge=True)
+        return False
+
+    return _tx(tx)
+
 LINE_TOKEN  = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 PLACES_KEY  = os.environ.get("PLACES_API_KEY", "")
@@ -51,27 +77,6 @@ def verify_signature(raw_body: bytes, signature: str) -> bool:
     mac = hmac.new(LINE_SECRET.encode(), raw_body, hashlib.sha256).digest()
     expected = base64.b64encode(mac).decode()
     return hmac.compare_digest(signature or "", expected)
-
-def line_reply(reply_token: str, messages: list) -> bool:
-    try:
-        r = httpx.post(
-            "https://api.line.me/v2/bot/message/reply",
-            headers={"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"},
-            json={"replyToken": reply_token, "messages": messages},
-            timeout=10.0
-        )
-        if r.status_code >= 400:
-            # 看清楚 LINE 回什麼錯（欄位/格式/圖片等）
-            print("LINE_REPLY_ERR", {
-                "status": r.status_code,
-                "body": r.text[:2000],
-                "messages_preview": str(messages)[:1000]
-            })
-            return False
-        return True
-    except Exception as e:
-        print("LINE_REPLY_EXC", repr(e))
-        return False
 
 def fetch_line_profile(uid: str) -> dict | None:
     try:
@@ -84,6 +89,340 @@ def fetch_line_profile(uid: str) -> dict | None:
         return r.json()
     except httpx.HTTPError:
         return None
+
+# === 1) 摘要 messages 結構（新增） ===
+def summarize_messages(messages: list[dict]) -> dict:
+    """
+    回傳：
+      total / text / image / flexBubble / flexCarousel
+    - flex: 若為 carousel → flexCarousel += 1，並且 flexBubble += 內容張數
+            若為 bubble  → flexBubble   += 1
+    """
+    s = {"total": 0, "text": 0, "image": 0, "flexBubble": 0, "flexCarousel": 0}
+    for m in messages or []:
+        s["total"] += 1
+        t = (m or {}).get("type")
+        if t == "text":
+            s["text"] += 1
+        elif t == "image":
+            s["image"] += 1
+        elif t == "flex":
+            contents = (m.get("contents") or {})
+            ctype = (contents.get("type") or "").lower()
+            if ctype == "carousel":
+                items = contents.get("contents") or []
+                s["flexCarousel"] += 1
+                s["flexBubble"]   += len(items)
+            elif ctype == "bubble":
+                s["flexBubble"] += 1
+    return s
+
+# === 2) 原本的 line_reply 改名成底層呼叫（替換你檔案中的 line_reply）===
+def _line_reply_raw(reply_token: str, messages: list) -> bool:
+    try:
+        r = httpx.post(
+            "https://api.line.me/v2/bot/message/reply",
+            headers={"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"},
+            json={"replyToken": reply_token, "messages": messages},
+            timeout=10.0
+        )
+        if r.status_code >= 400:
+            print("LINE_REPLY_ERR", {"status": r.status_code, "body": r.text[:2000]})
+            return False
+        return True
+    except Exception as e:
+        print("LINE_REPLY_EXC", repr(e))
+        return False
+
+# === 3) stats_ping：呼叫 C# /stats/ping（新增）===
+def stats_ping(metric: str, count: int = 1, date_id: str | None = None) -> bool:
+    base = os.environ.get("STATS_BASE_URL")
+    if not base:
+        return False
+    try:
+        body = {"metric": metric, "count": int(count)}
+        if date_id:
+            body["dateId"] = date_id
+        # 若你的 C# 是 /inc，請改成 f"{base}/inc"
+        r = httpx.post(f"{base}/stats/ping", json=body, timeout=5.0)
+        return r.status_code < 400
+    except Exception as e:
+        print("STATS_PING_FAIL", metric, count, repr(e))
+        return False
+
+def _stats_inc_local(date_id: str, diffs: dict[str, int]):
+    """HTTP 打點失敗時，直接寫 Firestore 累加，避免漏計。"""
+    ref = _usage_ref(date_id)
+    payload = {"updatedAt": firestore.SERVER_TIMESTAMP}
+    for k, v in diffs.items():
+        payload[f"counters.{k}"] = Increment(int(v))
+    ref.set({"dateId": date_id}, merge=True)
+    ref.update(payload)
+
+# === 4) 高階包裝：真正給程式呼叫的 line_reply（新增）===
+def line_reply(reply_token: str, messages: list, *, to_user: str | None = None, trace_id: str | None = None) -> bool:
+    summary = summarize_messages(messages)
+    ok = _line_reply_raw(reply_token, messages)
+
+    # ✅ 只有成功送出才進行統計
+    if ok:
+        date_id = _today_id()
+        seen_key = f"reply:{trace_id}" if trace_id else None
+        if seen_key and _seen_mark_and_check(date_id, seen_key):
+            pass  # 今天已記過，不再累加
+        else:
+            need_fallback = False
+            diffs = {}
+
+            def _acc(key, val):
+                nonlocal need_fallback
+                if val:
+                    ok2 = stats_ping(key, val, date_id)
+                    diffs[key] = diffs.get(key, 0) + int(val)
+                    if not ok2:
+                        need_fallback = True
+
+            _acc("messages_total", summary["total"])
+            _acc("messages_text", summary["text"])
+            _acc("messages_image", summary["image"])
+            _acc("messages_flex_bubble", summary["flexBubble"])
+            _acc("messages_flex_carousel", summary["flexCarousel"])
+
+            if need_fallback and any(diffs.values()):
+                _stats_inc_local(date_id, diffs)
+
+    # outbox
+    try:
+        get_db().collection("events").document("outbox").collection("logs").add({
+            "ts": int(time.time()*1000),
+            "channel": "line",
+            "kind": "reply",
+            "to": [to_user] if to_user else [],
+            "replyToken": reply_token,
+            "messages": messages,
+            "summary": summary,
+            "result": "ok" if ok else "failed",
+            "traceId": trace_id,
+        })
+    except Exception as e:
+        print("OUTBOX_WRITE_FAIL", repr(e))
+
+    return ok
+
+# ==== Backfill: 回補歷史用量（排除管理推播） ====================================
+def _cards_per_reply_default() -> int:
+    # 先讀環境變數，沒有就用 settings/replies.cardsPerReply，最後預設 5
+    try:
+        n = int(os.environ.get("CARDS_PER_REPLY", "").strip() or 0)
+        if 3 <= n <= 9:
+            return n
+    except Exception:
+        pass
+    try:
+        return cards_per_reply()
+    except Exception:
+        return 5
+
+def _date_ids_in_range(date_from: str, date_to: str):
+    cur = _dt.datetime.strptime(date_from, "%Y%m%d")
+    end = _dt.datetime.strptime(date_to, "%Y%m%d")
+    while cur < end:
+        yield cur.strftime("%Y%m%d")
+        cur += _dt.timedelta(days=1)
+
+def _is_reply_outbox(doc_dict: dict) -> bool:
+    """只計算『回覆』訊息，排除管理推播/群發"""
+    if not isinstance(doc_dict, dict):
+        return False
+
+    # 1) 有 replyToken 一律視為 reply
+    if doc_dict.get("replyToken"):
+        return True
+
+    # 2) kind 明確不是 reply → 排除
+    kind = (doc_dict.get("kind") or "").lower()
+    if kind and kind != "reply":
+        return False
+
+    # 3) 具有推播特徵 → 排除
+    if doc_dict.get("targets"):
+        return False
+    if doc_dict.get("unitName") or doc_dict.get("unit"):
+        return False
+    if doc_dict.get("by"):
+        return False
+
+    # 4) 其餘情況（kind 為空或為 "reply"）→ 視為 reply
+    return True
+
+@https_fn.on_request(region="asia-east1", secrets=[])
+def backfill_usage(req: https_fn.Request) -> https_fn.Response:
+    """
+    回補歷史用量（排除管理推播）
+    需要管理員 ID Token（Authorization: Bearer <idToken>）
+    POST JSON 參數：
+      {
+        "from": "20250101",          // 起日(含)
+        "to":   "20251101",          // 迄日(不含)
+        "cards": 5,                  // 估算法：每次回覆含幾張 bubble（預設讀環境或 settings）
+        "source": "auto"             // auto|outbox|events
+      }
+    策略：
+      1) outbox 精準回填：僅計 reply（排除管理推播）
+      2) 若當日 outbox 無資料 → events/location 估算（同樣不含管理推播路徑）
+    寫入：usage_maps_daily/{dateId} 的 counters.*
+      - messages_total / messages_text / messages_image / messages_flex_bubble / messages_flex_carousel
+    """
+    try:
+        # 權限：僅限管理員
+        _require_admin_from_idtoken(req.headers.get("Authorization", ""))
+
+        if req.method != "POST":
+            return https_fn.Response("POST only", status=405)
+
+        body = req.get_json(silent=True) or {}
+        date_from = str(body.get("from") or "")
+        date_to   = str(body.get("to")   or "")
+        source    = (body.get("source") or "auto").lower()
+        N_cards   = int(body.get("cards") or _cards_per_reply_default())
+        includePush = bool(body.get("includeAdminPush") or False)
+
+        if not (len(date_from)==8 and len(date_to)==8 and date_from.isdigit() and date_to.isdigit()):
+            return https_fn.Response("bad range", status=400)
+
+        db = get_db()
+        updated_days = 0
+        summary_days = {}
+
+        for day in _date_ids_in_range(date_from, date_to):
+            used_any = False
+
+            # ---------- 先看 outbox：只計 reply ----------
+            if source in ("auto", "outbox"):
+                start_ms = int(_dt.datetime.strptime(day, "%Y%m%d").timestamp() * 1000)
+                end_ms   = int((_dt.datetime.strptime(day, "%Y%m%d") + _dt.timedelta(days=1)).timestamp() * 1000)
+
+                logs = list(
+                    db.collection("events").document("outbox").collection("logs")
+                      .where("ts", ">=", start_ms)
+                      .where("ts", "<",  end_ms)
+                      .stream()
+                )
+
+                totals = {"total":0, "text":0, "image":0, "flexBubble":0, "flexCarousel":0}
+                for d in logs:
+                    x = d.to_dict() or {}
+                    if not _is_reply_outbox(x):
+                        continue
+                    msgs = x.get("messages") or []
+                    s = summarize_messages(msgs)   # 直接用你檔案既有的函式
+                    for k in totals:
+                        totals[k] += s[k]
+
+                if sum(totals.values()) > 0:
+                    ref = db.collection("usage_maps_daily").document(day)
+                    ref.set({"dateId": day}, merge=True)
+                    ref.update({
+                        "updatedAt": firestore.SERVER_TIMESTAMP,
+                        "counters.messages_total":         Increment(totals["total"]),
+                        "counters.messages_text":          Increment(totals["text"]),
+                        "counters.messages_image":         Increment(totals["image"]),
+                        "counters.messages_flex_bubble":   Increment(totals["flexBubble"]),
+                        "counters.messages_flex_carousel": Increment(totals["flexCarousel"]),
+                    })
+                    summary_days[day] = {"mode": "outbox", **totals}
+                    updated_days += 1
+                    used_any = True
+                    
+            # ---------- （可選）回補管理推播：乘上收件人數 ----------
+            if includePush:
+                # 以同一天的毫秒範圍撈 outbox
+                start_ms = int(_dt.datetime.strptime(day, "%Y%m%d").timestamp() * 1000)
+                end_ms   = int((_dt.datetime.strptime(day, "%Y%m%d") + _dt.timedelta(days=1)).timestamp() * 1000)
+
+                # 撈出當日 outbox 紀錄
+                push_logs = []
+                try:
+                    push_logs = list(
+                        db.collection("events").document("outbox").collection("logs")
+                          .where("ts", ">=", start_ms)
+                          .where("ts", "<",  end_ms)
+                          .stream()
+                    )
+                except Exception:
+                    push_logs = []
+
+                # 累計推播（依訊息型別 × 收件人數）
+                p = {"total":0, "text":0, "image":0, "flexBubble":0, "flexCarousel":0}
+                for d in push_logs:
+                    x = d.to_dict() or {}
+                    kind = (x.get("kind") or "").lower()
+                    # 視為管理推播（push/multicast/broadcast 或帶有 targets/unitName/by）
+                    is_admin_push = bool(
+                        kind in ("push","multicast","broadcast")
+                        or x.get("targets") or x.get("unitName") or x.get("by")
+                    )
+                    if not is_admin_push:
+                        continue
+
+                    s = summarize_messages(x.get("messages") or [])
+                    nrec = len(x.get("targets") or []) or 1  # 收件人數（無 targets 視為 1）
+
+                    p["total"]        += s["total"]        * nrec
+                    p["text"]         += s["text"]         * nrec
+                    p["image"]        += s["image"]        * nrec
+                    p["flexBubble"]   += s["flexBubble"]   * nrec
+                    p["flexCarousel"] += s["flexCarousel"] * nrec
+
+                # 寫入 counters.push_*（使用 Increment；重跑會再次累加）
+                if sum(p.values()) > 0:
+                    ref = db.collection("usage_maps_daily").document(day)
+                    ref.set({"dateId": day}, merge=True)
+                    ref.update({
+                        "updatedAt": firestore.SERVER_TIMESTAMP,
+                        "counters.push_total":          Increment(p["total"]),
+                        "counters.push_text":           Increment(p["text"]),
+                        "counters.push_image":          Increment(p["image"]),
+                        "counters.push_flex_bubble":    Increment(p["flexBubble"]),
+                        "counters.push_flex_carousel":  Increment(p["flexCarousel"]),
+                    })
+                    # 回傳摘要可選（方便你看回應）
+                    summary_days.setdefault(day, {}).update({"push": p})
+
+            # ---------- 沒 outbox → fallback events/location 估算 ----------
+            if (not used_any) and (source in ("auto", "events")):
+                coll = db.collection("events").document(day).collection("logs")
+                docs = list(coll.where("type", "==", "message").stream())
+                count_loc = 0
+                for d in docs:
+                    ev = (d.to_dict() or {}).get("event") or {}
+                    m = (ev.get("message") or {})
+                    if m.get("type") == "location":
+                        count_loc += 1
+
+                if count_loc > 0:
+                    ref = db.collection("usage_maps_daily").document(day)
+                    ref.set({"dateId": day}, merge=True)
+                    ref.update({
+                        "updatedAt": firestore.SERVER_TIMESTAMP,
+                        # 估算：1 則文字 + 1 則 Flex（carousel），每次 Flex 內含 N_cards 張 bubble
+                        "counters.messages_total":         Increment(count_loc * 2),
+                        "counters.messages_text":          Increment(count_loc * 1),
+                        "counters.messages_flex_carousel": Increment(count_loc * 1),
+                        "counters.messages_flex_bubble":   Increment(count_loc * N_cards),
+                    })
+                    summary_days[day] = {"mode": "events-location-est", "loc": count_loc, "cardsPerReply": N_cards}
+                    updated_days += 1
+
+        return https_fn.Response(
+            json.dumps({"ok": True, "updatedDays": updated_days, "summary": summary_days}, ensure_ascii=False),
+            headers={"Content-Type": "application/json"}
+        )
+
+    except PermissionError as e:
+        return https_fn.Response(json.dumps({"error": str(e)}), status=403, headers={"Content-Type": "application/json"})
+    except Exception as e:
+        return https_fn.Response(json.dumps({"error": str(e)}), status=500, headers={"Content-Type": "application/json"})
 
 # ── Theme (settings/theme) helpers ─────────────────────────────────────────
 THEME_TTL_SEC = 60
@@ -569,6 +908,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
     for ev in events:
         etype = ev.get("type")
         uid = (ev.get("source") or {}).get("userId")
+        trace_id = ev.get("webhookEventId") or (ev.get("message") or {}).get("id")
 
         if etype == "follow":
             upsert_user(uid, source=ev.get("source"))
@@ -581,7 +921,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     "type":"text",
                     "text":"感謝加入！先輸入偏好食物（隨你慣用的寫法），再選搜尋半徑，最後分享你的位置 📍",
                     "quickReply": {"items": qr_items} if qr_items else None
-                }])
+                }], to_user=uid, trace_id=trace_id)
             except Exception:
                 pass
             continue
@@ -599,9 +939,9 @@ def line(req: https_fn.Request) -> https_fn.Response:
                         "type":"text",
                         "text": f"已設定搜尋半徑為 {radius} 公尺，請分享你的位置 📍",
                         "quickReply": {"items":[{"type":"action","action":{"type":"location","label":"分享位置 📍"}}]}
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                 except ValueError:
-                    line_reply(ev["replyToken"], [{"type":"text","text":"半徑格式不正確，請重新選擇一次喔。"}])
+                    line_reply(ev["replyToken"], [{"type":"text","text":"半徑格式不正確，請重新選擇一次喔。"}], to_user=uid, trace_id=trace_id)
             continue
 
         if etype == "message":
@@ -633,7 +973,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     line_reply(ev["replyToken"], [{
                         "type": "text",
                         "text": "目前餐廳查詢功能暫時關閉，請稍後再試 🙏"
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue
 
                 # 會話狀態：若正在收偏好，就把本次文字當偏好，記錄後引導選半徑
@@ -659,7 +999,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                                 {"type":"action","action":{"type":"message","label":"2000m","text":"2000m"}}
                             ]
                         }
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue
 
                 # 1) 啟動流程 → 只請他選半徑
@@ -671,7 +1011,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                         "type":"text",
                         "text":"請先輸入偏好食物（例如：牛肉麵、拉麵、滷味、燒臘、咖哩飯…照你的習慣打）",
                         "quickReply": {"items": qr_items} if qr_items else None
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue
 
                 # 2) 要求擴大範圍 → 請他再分享位置
@@ -684,7 +1024,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                                 {"type": "action", "action": {"type": "location", "label": "分享位置 📍"}}
                             ]
                         }
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue  # 這個事件到此結束，避免後面又處理到
 
                 # 3) 文字直接輸入半徑（例如 2000m）→ 設定並要求分享位置
@@ -697,9 +1037,9 @@ def line(req: https_fn.Request) -> https_fn.Response:
                             "type": "text",
                             "text": f"已設定搜尋半徑為 {radius} 公尺，請分享你的位置 📍",
                             "quickReply": {"items":[{"type":"action","action":{"type":"location","label":"分享位置 📍"}}]}
-                        }])
+                        }], to_user=uid, trace_id=trace_id)
                     except ValueError:
-                        line_reply(ev["replyToken"], [{"type":"text","text":"半徑格式不正確，請輸入像 2000m 這樣的格式。"}])
+                        line_reply(ev["replyToken"], [{"type":"text","text":"半徑格式不正確，請輸入像 2000m 這樣的格式。"}], to_user=uid, trace_id=trace_id)
                     continue
 
             # 位置 → Places
@@ -709,7 +1049,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     line_reply(ev["replyToken"], [{
                         "type": "text",
                         "text": "目前餐廳查詢功能暫時關閉，請稍後再試 🙏"
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue
                 lat = msg.get("latitude"); lng = msg.get("longitude")
                 prefer = get_user_radius(uid) if uid else None
@@ -719,7 +1059,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                         "type": "text",
                         "text": "還沒選搜尋半徑喔，先選一個距離再分享位置 📍",
                         "quickReply": quick_reply_radius()
-                    }])
+                    }], to_user=uid, trace_id=trace_id)
                     continue
 
                 items, used_radius = [], prefer
@@ -735,7 +1075,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                     msg_txt = "這附近目前找不到有營業的餐廳😵，換個距離再找？"
                     if qpref:
                         msg_txt = f"在這附近找不到「{qpref}」😵，換個距離再找？或換個關鍵字試試。"
-                    line_reply(ev["replyToken"], [{"type":"text","text": msg_txt, "quickReply": quick_reply_radius()}])
+                    line_reply(ev["replyToken"], [{"type":"text","text": msg_txt, "quickReply": quick_reply_radius()}], to_user=uid, trace_id=trace_id)
                     set_session_pref(uid, None)
                     continue
 
@@ -750,7 +1090,7 @@ def line(req: https_fn.Request) -> https_fn.Response:
                         "altText": (title[:380] + "（圖卡）"),  # altText 必填且 ≤ 400 字
                         "contents": flex_contents
                     }
-                ])
+                ], to_user=uid, trace_id=trace_id)
 
                 if not ok:
                     # 不要再回覆第二次，只記錄需要降級回覆的資訊
@@ -768,22 +1108,9 @@ def line(req: https_fn.Request) -> https_fn.Response:
 
 @https_fn.on_request(region="asia-east1", secrets=["LINE_CHANNEL_ACCESS_TOKEN"])
 def adminPush(req: https_fn.Request) -> https_fn.Response:
-    """後台『特定行銷』推播 API。
-    請求格式：
-      headers: Authorization: Bearer <Firebase ID Token>
-      body: {
-        "targets": ["<LINE userId>", ...],   // 由前端勾選
-        "message": {
-          "type": "text", "text": "可\n換行"
-          // 或
-          "type": "flex", "title": "...", "body": "...", "image": "https://...", "buttonLabel": "...", "buttonUrl": "https://..."
-        }
-      }
-    回應：{ ok, batches, success, fail } 或 { error }
-    """
+    """後台『特定行銷』推播 API（含精準計數：乘上收件人數）。"""
     try:
-        # 1) 權限驗證
-        _require_admin_from_idtoken(req.headers.get("Authorization", ""))
+        _require_admin_from_idtoken(req.headers.get("Authorization", ""))   # 僅管理員
 
         if req.method != "POST":
             return https_fn.Response(json.dumps({"error": "POST_ONLY"}), status=405,
@@ -792,11 +1119,15 @@ def adminPush(req: https_fn.Request) -> https_fn.Response:
         data = req.get_json(silent=True) or {}
         targets = data.get("targets") or []
         msg     = data.get("message") or {}
+        unit    = (data.get("unitName") or "").strip() or None
+        notify  = bool(data.get("notificationDisabled") or False)
+        trace   = data.get("traceId")
+
         if not isinstance(targets, list) or not targets:
             return https_fn.Response(json.dumps({"error": "NO_TARGETS"}), status=400,
                                      headers={"Content-Type": "application/json"})
 
-        # 2) 組 LINE 訊息
+        # 1) 組 LINE 訊息
         if msg.get("type") == "text":
             line_msg = {"type": "text", "text": str(msg.get("text") or "")[:5000]}
         elif msg.get("type") == "flex":
@@ -816,43 +1147,75 @@ def adminPush(req: https_fn.Request) -> https_fn.Response:
             return https_fn.Response(json.dumps({"error": "BAD_MESSAGE"}), status=400,
                                      headers={"Content-Type": "application/json"})
 
-        # 3) 依 LINE multicast 限制分批（500/批）
-        CHUNK = 500
-        batches = [targets[i:i+CHUNK] for i in range(0, len(targets), CHUNK)]
-        succ = fail = 0
-        for batch in batches:
-            try:
-                r = httpx.post(
-                    "https://api.line.me/v2/bot/message/multicast",
-                    headers={
-                        "Authorization": f"Bearer {LINE_TOKEN}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"to": batch, "messages": [line_msg]},
-                    timeout=15.0,
-                )
-                if r.status_code < 400:
-                    succ += 1
-                else:
-                    fail += 1
-                    print("LINE_MULTICAST_ERR", r.status_code, r.text[:500])
-            except Exception as e:
-                fail += 1
-                print("LINE_MULTICAST_EXC", repr(e))
+        # 2) 送出（單人 / 多人）
+        headers = {"Authorization": f"Bearer {LINE_TOKEN}", "Content-Type": "application/json"}
+        ok = False
+        if len(targets) == 1:
+            payload = {"to": targets[0], "messages": [line_msg], "notificationDisabled": notify}
+            r = httpx.post("https://api.line.me/v2/bot/message/push", headers=headers, json=payload, timeout=15.0)
+            ok = (r.status_code < 400)
+            if not ok: print("LINE_PUSH_ERR", r.status_code, r.text[:500])
+        else:
+            payload = {"to": targets, "messages": [line_msg], "notificationDisabled": notify}
+            r = httpx.post("https://api.line.me/v2/bot/message/multicast", headers=headers, json=payload, timeout=30.0)
+            ok = (r.status_code < 400)
+            if not ok: print("LINE_MULTICAST_ERR", r.status_code, r.text[:500])
 
-        # 4) 記一筆 job
+        # 3) 寫 outbox（標記為推播）
+        try:
+            get_db().collection("events").document("outbox").collection("logs").add({
+                "ts": int(time.time()*1000),
+                "channel": "line",
+                "kind": "push",
+                "targets": targets,
+                "unitName": unit,
+                "messages": [line_msg],
+                "result": "ok" if ok else "failed",
+                "traceId": trace,
+            })
+        except Exception as e:
+            print("OUTBOX_PUSH_WRITE_FAIL", repr(e))
+
+        # 4) 精準計數（乘上收件人數）
+        try:
+            summary = summarize_messages([line_msg])
+            n = max(1, len(targets))
+            date_id = _today_id()
+            need_fallback = False
+            diffs = {}
+
+            def _acc(key, val):
+                nonlocal need_fallback
+                if val:
+                    ok2 = stats_ping(key, val, date_id)
+                    diffs[key] = diffs.get(key, 0) + int(val)
+                    if not ok2:
+                        need_fallback = True
+
+            _acc("push_total",          summary["total"] * n)
+            _acc("push_text",           summary["text"]  * n)
+            _acc("push_image",          summary["image"] * n)
+            _acc("push_flex_bubble",    summary["flexBubble"] * n)
+            _acc("push_flex_carousel",  summary["flexCarousel"] * n)
+            if unit:
+                _acc(f"push_by_unit.{unit}", summary["total"] * n)
+
+            if need_fallback and any(diffs.values()):
+                _stats_inc_local(date_id, diffs)
+        except Exception as e:
+            print("USAGE_PUSH_SYNC_FAIL", repr(e))
+
+        # 5) 簡單 job 紀錄
         get_db().collection("push_jobs").add({
             "ts": int(time.time()),
             "type": msg.get("type"),
             "targets": len(targets),
-            "batches": len(batches),
-            "success": succ,
-            "fail": fail,
+            "success": 1 if ok else 0,
+            "fail": 0 if ok else 1,
+            "unitName": unit
         })
 
-        return https_fn.Response(json.dumps({
-            "ok": True, "batches": len(batches), "success": succ, "fail": fail
-        }), headers={"Content-Type": "application/json"})
+        return https_fn.Response(json.dumps({"ok": ok}), headers={"Content-Type": "application/json"})
 
     except PermissionError as e:
         return https_fn.Response(json.dumps({"error": str(e)}), status=403,

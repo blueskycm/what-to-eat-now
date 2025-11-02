@@ -10,15 +10,18 @@
       "source": "functions",
       "codebase": "default",
       "ignore": ["venv", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local"],
-      "runtime": "python313"
-    }
-  ],
+      "runtime": "python313",
+      "environmentVariables": {"STATS_BASE_URL": "https://eatnow-usage-api-18967449501.asia-east1.run.app"}
+      }
+    ],
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
-      { "source": "/line/**",       "function": { "functionId": "line",       "region": "asia-east1" } },
-      { "source": "/admin/push",    "function": { "functionId": "adminPush",  "region": "asia-east1" } }
+      { "source": "/line/**",    "function": { "functionId": "line",      "region": "asia-east1" } },
+      { "source": "/admin/push", "function": { "functionId": "adminPush", "region": "asia-east1" } },
+      { "source": "/api/usage/**",
+        "run": { "serviceId": "eatnow-usage-api", "region": "asia-east1" } }
     ],
     "headers": [
       { "source": "**/*.html", "headers": [ { "key": "Cache-Control", "value": "no-cache" } ] }

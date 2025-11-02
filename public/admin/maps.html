@@ -21,6 +21,8 @@
     .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
     .pill{border:1px solid var(--gray);border-radius:12px;padding:12px}
     .pill h4{margin:0 0 6px 0}
+    .muted{color:#6b7280}
+    code{background:#f3f4f6;padding:2px 6px;border-radius:6px}
   </style>
 </head>
 <body>
@@ -29,7 +31,7 @@
   <div class="container">
     <div class="card">
       <h1>Google Maps 成本與開關</h1>
-      <p class="muted">此頁會讀寫 <code>settings/maps</code> 與讀取 <code>usage_maps_daily/{YYYYMMDD}</code>。只有管理員可使用。</p>
+      <p class="muted">此頁會讀寫 <code>settings/maps</code> 與 <code>settings/replies</code>；並讀取 <code>usage_maps_daily/{YYYYMMDD}</code> 與 C# API 彙總。只有管理員可使用。</p>
 
       <p><b>目前使用者：</b><span id="who">檢查中…</span> <code id="uid"></code></p>
       <p id="guard" class="muted">檢查權限中…</p>
@@ -87,27 +89,48 @@
 
         <hr>
 
-        <h3 style="margin:6px 0 8px 0">今日用量</h3>
-        <p class="muted" id="usageDate">—</p>
+        <h3 style="margin:6px 0 8px 0">今日訊息用量（C# API）</h3>
+        <p class="muted" id="usageApiDate">來源：/api/usage/stats/today</p>
+
         <div class="grid">
-          <div class="pill"><h4>Static</h4><div><b id="uStatic">0</b> 次</div></div>
-          <div class="pill"><h4>Embed</h4><div><b id="uEmbed">0</b> 次</div></div>
-          <div class="pill"><h4>JS</h4><div><b id="uJs">0</b> 次</div></div>
+          <div class="pill">
+            <h4>使用者回覆（reply）</h4>
+            <div>總訊息：<b id="uMsgTotal">0</b></div>
+            <div style="font-size:13px;color:#555">
+              文字：<b id="uMsgText">0</b> ｜ 餐廳卡片：<b id="uMsgBubble">0</b> ｜ 使用次數：<b id="uMsgCarousel">0</b>
+            </div>
+          </div>
+          <div class="pill">
+            <h4>管理推播（push）</h4>
+            <div>可計費總數：<b id="uPushTotal">0</b></div>
+            <div style="font-size:13px;color:#555">
+              文字：<b id="uPushText">0</b> ｜ 圖片：<b id="uPushImage">0</b><br>
+              餐廳卡片：<b id="uPushBubble">0</b> ｜ 使用次數：<b id="uPushCarousel">0</b>
+            </div>
+          </div>
+          <div class="pill">
+            <h4>提示</h4>
+            <div style="font-size:13px;color:#555">
+              使用次數 = 一次完整餐廳推薦流程（位置 → 回覆清單）。<br>
+              Places API 請求估算：每次使用 1 次 + 每張餐廳卡片 2 次（圖片 + 位置連結）。
+            </div>
+          </div>
         </div>
+
+        <hr>
+
         <div class="row" style="margin-top:12px">
-          <label>合計</label>
-          <span><b id="uTotal">0</b> 次</span>
+          <label>Places API 請求</label>
+          <span>今日：<b id="placesToday">0</b> 次　｜　本月：<b id="placesMonth">0</b> 次</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- 掛載共用 Navbar（→ ./lib/） -->
   <script type="module">
     import { mountNavbar } from "./lib/navbar.js";
     mountNavbar({ active: "maps" });
   </script>
-  <!-- 主程式 -->
   <script type="module" src="./maps.js"></script>
 </body>
 </html>
