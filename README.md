@@ -1,10 +1,9 @@
 # 🍱 吃飯囉！整個城市都是我的後廚房 (What To Eat Now)<a id="現在吃什麼-what-to-eat-now"></a>
 
-一個結合 **LINE 聊天機器人 + Google Maps Places API + Firebase 後台**
-的推薦系統。\
-使用者只需輸入食物名稱與分享位置，系統即時回傳附近的餐廳圖卡。\
-管理者可於 Firebase Hosting 後台設定卡片樣式、Maps
-成本模式、以及行銷推播。
+結合 **LINE 聊天機器人 + Google Maps Places API + Firebase（Functions/Firestore/Hosting/Auth/Storage）+ Cloud Run（.NET 8）**
+的餐廳推薦系統。<br>
+使用者只需輸入喜好食物與分享位置，系統即時回傳附近的餐廳清單（Flex 圖卡）。<br>
+管理者可在後台網頁設定圖卡樣式、Google Maps Places API 成本估算、功能開關、行銷推播，並查看「今日 / 本月」用量（含 Places API 估算）。
 
 ---
 ## 📑 目錄 (Table of Contents)
@@ -13,7 +12,9 @@
   - [🚀 系統概觀 (System Overview)](#系統概觀-system-overview)
   - [🧩 技術架構 (Tech-Stack)](#技術架構-tech-stack)
   - [📂 專案結構 (Project-Structure)](#專案結構-project-structure)
-  - [⚙️ 安裝與部署 (Setup--Deployment)](#️安裝與部署-setup--deployment)
+  - [⚙️ 安裝與部署](#️安裝與部署)
+    - [Functions（Python）](#Firebase)
+  
   - [🔐 Firestore 結構 (Firestore-Schema)](#firestore-結構-firestore-schema)
   - [💬 LINE Bot 功能 (LINE-Webhook)](#line-bot-功能-line-webhook)
   - [🧰 後台功能 (Admin-Console)](#後台功能-admin-console)
@@ -79,14 +80,25 @@
 
 ---
 
-## ⚙️ 安裝與部署 (Setup & Deployment)<a id="安裝與部署-setup--deployment"></a>
+## ⚙️ 安裝與部署 <a id="安裝與部署"></a>
 
-### 1️⃣ 初始化 Firebase
+### Functions（Python）<a id="Firebase"></a>
 
-``` bash
-firebase init functions hosting
-# 選擇 Python runtime, 地區 asia-east1
-```
+#### 1. 初始化 
+
+    ``` bash
+    firebase init functions hosting
+    # 選擇 Python runtime, 地區 asia-east1
+    ```
+
+#### 2.Secrets
+
+    ``` bash
+    firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
+    firebase functions:secrets:set LINE_CHANNEL_SECRET
+    firebase functions:secrets:set PLACES_API_KEY
+    firebase functions:secrets:set LIFF_SLOT_URL
+    ```
 
 ### 2️⃣ 安裝 Python 依賴
 
