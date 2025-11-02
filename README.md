@@ -86,19 +86,19 @@
 
 #### 1. 初始化 
 
-    ``` bash
-    firebase init functions hosting
-    # 選擇 Python runtime, 地區 asia-east1
-    ```
+  ``` bash
+  firebase init functions hosting
+  # 選擇 Python runtime, 地區 asia-east1
+  ```
 
 #### 2.Secrets
 
-    ``` bash
-    firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
-    firebase functions:secrets:set LINE_CHANNEL_SECRET
-    firebase functions:secrets:set PLACES_API_KEY
-    firebase functions:secrets:set LIFF_SLOT_URL
-    ```
+  ``` bash
+  firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
+  firebase functions:secrets:set LINE_CHANNEL_SECRET
+  firebase functions:secrets:set PLACES_API_KEY
+  firebase functions:secrets:set LIFF_SLOT_URL
+  ```
 
 ### 2️⃣ 安裝 Python 依賴
 
